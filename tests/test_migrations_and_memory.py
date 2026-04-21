@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+import sqlite3
+
+from psi_coprocessor_mcp.models import MemoryLane
+
+
+def test_migrations_apply_and_seed_memory(database: sqlite3.Connection, repository):
+    migration_count = database.connection.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"]
+    assert migration_count == 5
+    method = repository.get_method_memory("current")
+    assert "visibility events" in method.content
+    normalization = repository.get_method_memory("normalization-map")
+    assert "confidence from durability" in normalization.content
+    retrieval = repository.retrieve("durability", [MemoryLane.METHOD, MemoryLane.STABLE_USER], limit=5)
+    assert retrieval
+    assert any(hit.lane in {MemoryLane.METHOD, MemoryLane.STABLE_USER} for hit in retrieval)
+
+
+def test_memory_commit_and_retrieve(repository, service):
+    started = service.start_run(title="Memory", scope="Track durable constraints", project_name="Memory Project")
+    project_id = started["project_id"]
+    run_id = started["run_id"]
+
+    service.commit_memory(
+        lane="project",
+        key="constraints",
+        title="Project constraints",
+        content="SQLite and typed persistence are non-negotiable.",
+        tags=["constraints", "sqlite"],
+        project_id=project_id,
+    )
+    service.commit_memory(
+        lane="run_state",
+        key="probe",
+        title="Current probe",
+        content="Check blast radius before accepting the patch.",
+        tags=["probe"],
+        run_id=run_id,
+    )
+
+    hits = service.retrieve_memory("blast radius", lanes=["project", "run_state"], limit=10)["hits"]
+    assert len(hits) >= 1
+    assert any("blast radius" in hit["content"].lower() or "constraints" in hit["title"].lower() for hit in hits)
+
+
+def test_typed_claims_and_compliance_are_persisted(repository, service):
+    result = service.reflect(
+        task="We must preserve whole-field propagation and keep confidence separate from durability.",
+        project_name="Claims Project",
+    )
+    claims = repository.list_typed_claims(result["run_id"])
+    assert claims
+    assert any(claim.load_bearing for claim in claims)
+    compliance = repository.get_compliance_report(result["run_id"])
+    assert compliance is not None
+    assert compliance.status in {"PASS", "WARN", "BLOCKED"}
+
+
+def test_source_objects_are_persisted(repository, service):
+    result = service.reflect(
+        task="Audit the architecture boundary.",
+        attached_context="Spec excerpt: the source artifact defines the current boundary.",
+        project_name="Source Project",
+    )
+    source_objects = repository.list_source_objects(result["run_id"])
+    assert source_objects
+    assert any(source.source_kind.value == "task" for source in source_objects)
+    assert any(source.source_kind.value == "context" for source in source_objects)

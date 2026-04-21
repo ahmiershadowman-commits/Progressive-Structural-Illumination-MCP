@@ -1,0 +1,6 @@
+{
+  "task": "We need to revise a server design after a failing migration exposed hidden coupling between persistence and artifact sync.",
+  "draft_answer": "Patch the migration and continue.",
+  "attached_context": "The server persists run-state in SQLite and regenerates artifacts from live state.",
+  "durability_mode": "blocking"
+}

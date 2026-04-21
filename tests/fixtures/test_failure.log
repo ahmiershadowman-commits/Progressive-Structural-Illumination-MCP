@@ -1,0 +1,6 @@
+ImportError while importing test module 'tests/test_runtime.py'
+Traceback (most recent call last):
+  File "tests/test_runtime.py", line 10, in <module>
+    import missing_dependency
+ModuleNotFoundError: No module named 'missing_dependency'
+FAILED tests/test_runtime.py::test_state - AssertionError: build failed

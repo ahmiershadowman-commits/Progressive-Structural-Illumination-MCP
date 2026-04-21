@@ -1,0 +1,15 @@
+CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_runs_updated_at ON runs(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_visibility_events_run_id ON visibility_events(run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_coherence_sweeps_run_id ON coherence_sweeps(run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_anchors_project_id ON anchors(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_tensions_project_id ON tensions(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_project_id ON hypotheses(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_discriminators_project_id ON discriminators(project_id);
+CREATE INDEX IF NOT EXISTS idx_friction_logs_run_id ON friction_logs(run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_constraints_project_id ON constraints(project_id, active);
+CREATE INDEX IF NOT EXISTS idx_project_memory_project_id ON project_memory(project_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_run_memory_run_id ON run_memory(run_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON artifacts(run_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dead_ends_project_id ON dead_ends(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_project_snapshots_project_id ON project_snapshots(project_id, created_at DESC);

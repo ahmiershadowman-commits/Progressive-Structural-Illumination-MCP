@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "psi-coprocessor-mcp"
+version = "1.0.0"
+description = "A local-first MCP server that operationalizes Progressive Structural Illumination as a typed cognitive coprocessor."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+  { name = "Ashbi" }
+]
+dependencies = [
+  "mcp>=1.27.0,<2.0.0",
+  "pydantic>=2.11.0,<3.0.0",
+  "PyYAML>=6.0.2,<7.0.0",
+  "uvicorn>=0.35.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0,<9.0.0",
+  "pytest-asyncio>=1.1.0,<2.0.0",
+]
+
+[project.scripts]
+psi-coprocessor-mcp = "psi_coprocessor_mcp.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+psi_coprocessor_mcp = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+  "error",
+]

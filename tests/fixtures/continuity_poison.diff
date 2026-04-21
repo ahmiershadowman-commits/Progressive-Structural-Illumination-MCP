@@ -1,0 +1,8 @@
+diff --git a/server.py b/server.py
+--- a/server.py
++++ b/server.py
+@@
++# TODO: replace temporary placeholder store later
++STATE = {}
++def save():
++    pass
