@@ -78,6 +78,27 @@ def evaluate_compliance(
                 )
             )
 
+    if not run_state.state.applicability.applicable:
+        issues.append(
+            ComplianceIssue(
+                issue_type="applicability_boundary",
+                severity="error" if stable_output else "warning",
+                blocking=stable_output,
+                message="Phase 0 applicability boundary says the current target should be rescoped before stable PSI emission.",
+                related_entities=run_state.state.applicability.failure_modes[:6],
+            )
+        )
+
+    if not run_state.state.current_phase or not run_state.state.next_gating_condition:
+        issues.append(
+            ComplianceIssue(
+                issue_type="state_management",
+                severity="error" if stable_output else "warning",
+                blocking=stable_output,
+                message="Live run-state is missing current phase or next gating condition.",
+            )
+        )
+
     structure_gaps: list[str] = []
     if not run_state.state.sources:
         structure_gaps.append("sources")
@@ -104,6 +125,18 @@ def evaluate_compliance(
             )
         )
 
+    open_artifacts = [artifact.value for artifact in run_state.state.open_artifacts]
+    if stable_output and open_artifacts:
+        issues.append(
+            ComplianceIssue(
+                issue_type="open_artifacts",
+                severity="error",
+                blocking=True,
+                message="Stable emission is blocked while required artifacts are missing or non-authoritative.",
+                related_entities=open_artifacts[:10],
+            )
+        )
+
     source_issues = [
         f"{source.id}:{issue}"
         for source in run_state.state.sources
@@ -125,6 +158,24 @@ def evaluate_compliance(
             )
         )
 
+    scaffold_violations = [
+        claim.statement
+        for claim in run_state.state.C
+        if claim.scaffold_boundary
+        and (not claim.scaffold_boundary.bounded or claim.scaffold_boundary.substitute_for_real_structure)
+        and claim.load_bearing
+    ]
+    if scaffold_violations:
+        issues.append(
+            ComplianceIssue(
+                issue_type="bounded_scaffold_violation",
+                severity="error",
+                blocking=stable_output,
+                message="Load-bearing temporary scaffolds must be explicit, bounded, and non-substitutive.",
+                related_entities=scaffold_violations[:6],
+            )
+        )
+
     if not run_state.state.C:
         issues.append(
             ComplianceIssue(
@@ -132,6 +183,22 @@ def evaluate_compliance(
                 severity="warning",
                 blocking=False,
                 message="No typed claims are present; load-bearing claims should be provenance-tagged.",
+            )
+        )
+
+    basin_gaps = [
+        basin.title
+        for basin in run_state.state.basins
+        if not basin.explanatory_burden or not basin.weakening_conditions or not basin.discriminator_path
+    ]
+    if stable_output and basin_gaps:
+        issues.append(
+            ComplianceIssue(
+                issue_type="basin_burden",
+                severity="error",
+                blocking=True,
+                message="Stable emission requires live basins to expose burden, weakening conditions, and discriminator paths.",
+                related_entities=basin_gaps[:6],
             )
         )
     else:
@@ -224,6 +291,16 @@ def evaluate_compliance(
             )
         )
 
+    if run_state.state.uncertainty.propagation_limits and not run_state.state.uncertainty.partial_propagation_warnings:
+        issues.append(
+            ComplianceIssue(
+                issue_type="uncertainty_honesty",
+                severity="warning",
+                blocking=False,
+                message="Propagation limits are present but the partial-propagation warning surface is empty.",
+            )
+        )
+
     blocking = any(issue.blocking for issue in issues)
     status = "BLOCKED" if blocking else ("WARN" if issues else "PASS")
     requested_action = ""
@@ -233,9 +310,13 @@ def evaluate_compliance(
         requested_action = "rebuild_structure"
     if any(issue.issue_type == "source_grounding" for issue in issues):
         requested_action = "run_source_audit"
+    if any(issue.issue_type == "applicability_boundary" for issue in issues):
+        requested_action = "rescope"
     if any(issue.issue_type in {"stale_anchor_reuse", "untyped_friction", "local_update_prohibition"} for issue in issues):
         requested_action = "run_sweep"
     if any(issue.issue_type in {"durability_misuse", "known_bad_continuity"} for issue in issues):
+        requested_action = "rollback"
+    if any(issue.issue_type in {"open_artifacts", "bounded_scaffold_violation", "basin_burden"} for issue in issues):
         requested_action = "rollback"
     notes = [
         "Compliance checks verify state integrity after routing; they do not replace reasoning.",

@@ -159,6 +159,20 @@ def test_operator_and_provenance_extensions_are_available(service):
     assert "SOURCE" in provenances or "GROUNDED" in provenances
 
 
+def test_state_management_and_transition_alias_are_canonical(service):
+    result = service.reflect(
+        task="Track an architecture repair with ambiguity, field impact, and exportable artifacts.",
+        project_name="Control State Project",
+    )
+    run_id = result["run_id"]
+    state = service.get_run_state(run_id)
+    assert state["compact"]["run_class"] in {"exploratory", "working", "canonical"}
+    assert state["compact"]["current_phase"]
+    assert state["compact"]["next_gating_condition"]
+    transition = service.set_transition(run_id, decision="ROLLBACK", rationale="legacy alias input")
+    assert transition["decision"] == "ROLLBACK_REQUIRED"
+
+
 def test_source_audit_detects_duplicates_and_missing_artifacts(service):
     missing_path = r"C:\definitely-missing\psi_contract.md"
     result = service.reflect(

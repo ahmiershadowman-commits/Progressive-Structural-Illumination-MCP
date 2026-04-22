@@ -181,7 +181,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
             trigger_event_id=trigger_event_id or None,
         )
 
-    @mcp.tool(name="psi.anchor.register", description="Register a durable anchor.")
+    @mcp.tool(name="psi.anchor.register", description="Register a durable anchor, including weakening conditions and any bounded temporary scaffold semantics.")
     def psi_anchor_register(
         ctx: Context,
         name: str,
@@ -195,6 +195,10 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
         rationale: str = "",
         dependencies: list[str] | None = None,
         implications: list[str] | None = None,
+        weakening_conditions: list[str] | None = None,
+        explanatory_burden: list[str] | None = None,
+        scaffold_boundary: dict[str, object] | None = None,
+        user_promoted: bool = False,
     ) -> dict[str, object]:
         return _ctx_service(ctx).register_anchor(
             name=name,
@@ -208,6 +212,10 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
             rationale=rationale,
             dependencies=dependencies,
             implications=implications,
+            weakening_conditions=weakening_conditions,
+            explanatory_burden=explanatory_burden,
+            scaffold_boundary=scaffold_boundary,
+            user_promoted=user_promoted,
         )
 
     @mcp.tool(name="psi.anchor.invalidate", description="Invalidate or downgrade an anchor.")
@@ -243,6 +251,9 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
         risks: list[str] | None = None,
         discriminators: list[str] | None = None,
         forces: list[str] | None = None,
+        weakening_conditions: list[str] | None = None,
+        explanatory_burden: list[str] | None = None,
+        discriminator_path: list[str] | None = None,
     ) -> dict[str, object]:
         return _ctx_service(ctx).update_hypothesis(
             item_type=item_type,
@@ -258,9 +269,12 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
             risks=risks,
             discriminators=discriminators,
             forces=forces,
+            weakening_conditions=weakening_conditions,
+            explanatory_burden=explanatory_burden,
+            discriminator_path=discriminator_path,
         )
 
-    @mcp.tool(name="psi.discriminator.record", description="Record the best current discriminator.")
+    @mcp.tool(name="psi.discriminator.record", description="Record the best current discriminator and its expected outcome map.")
     def psi_discriminator_record(
         ctx: Context,
         title: str,
@@ -270,6 +284,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
         target: list[str] | None = None,
         best_next_probe: str = "",
         confidence_gain: float = 0.5,
+        expected_outcome_map: dict[str, str] | None = None,
     ) -> dict[str, object]:
         return _ctx_service(ctx).record_discriminator(
             title=title,
@@ -279,9 +294,10 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
             target=target,
             best_next_probe=best_next_probe,
             confidence_gain=confidence_gain,
+            expected_outcome_map=expected_outcome_map,
         )
 
-    @mcp.tool(name="psi.transition.set", description="Set or recommend ANCHOR, ROLLBACK, RESCOPE, ESCALATE, CONTINUE, or HALT.")
+    @mcp.tool(name="psi.transition.set", description="Set or recommend ANCHOR, ROLLBACK_REQUIRED, RESCOPE, ESCALATE, CONTINUE, or HALT. Legacy input ROLLBACK is accepted as an alias.")
     def psi_transition_set(
         ctx: Context,
         run_id: str,
@@ -666,7 +682,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
     def prompt_prepare_transition_decision(run_id: str) -> str:
         return (
             f"Prepare the next transition for run {run_id}.\n"
-            "Inspect run-state, strongest tension, current discriminator, and durability gate before selecting ANCHOR, ROLLBACK, RESCOPE, ESCALATE, CONTINUE, or HALT."
+            "Inspect run-state, strongest tension, current discriminator, and durability gate before selecting ANCHOR, ROLLBACK_REQUIRED, RESCOPE, ESCALATE, CONTINUE, or HALT."
         )
 
     @mcp.prompt(name="prepare_halt_decision", description="Prepare a halt decision under PSI.")

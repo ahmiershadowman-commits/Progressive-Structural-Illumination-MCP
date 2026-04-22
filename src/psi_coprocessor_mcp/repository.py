@@ -11,12 +11,14 @@ from .models import (
     AntiPatternFinding,
     AntiPatternType,
     Anchor,
+    ApplicabilityAssessment,
     ArtifactSnapshot,
     BasinType,
     BasinRecord,
     BlastRadiusImpact,
     ComplianceReport,
     ConfidenceLevel,
+    ConfidenceAxes,
     ConstraintItem,
     Discriminator,
     DurabilityClass,
@@ -35,8 +37,10 @@ from .models import (
     PrimitiveOperatorRecord,
     ProjectSummary,
     PsiRunState,
+    RunClass,
     RetrievalHit,
     RelationType,
+    ScaffoldBoundary,
     SearchRecord,
     SearchStatus,
     SkepticFinding,
@@ -408,6 +412,10 @@ class Repository:
 
         connection.execute("DELETE FROM gap_records WHERE run_id = ?", (run_id,))
         for gap in run_state.state.gaps:
+            metadata = {
+                **gap.metadata,
+                "smallest_discriminative_unit": gap.smallest_discriminative_unit,
+            }
             connection.execute(
                 """
                 INSERT INTO gap_records (
@@ -430,7 +438,7 @@ class Repository:
                     gap.discriminator,
                     1 if gap.blocking else 0,
                     gap.status,
-                    compact_json(gap.metadata),
+                    compact_json(metadata),
                     gap.created_at.isoformat(),
                     gap.updated_at.isoformat(),
                 ),
@@ -438,6 +446,10 @@ class Repository:
 
         connection.execute("DELETE FROM search_records WHERE run_id = ?", (run_id,))
         for search in run_state.state.searches:
+            metadata = {
+                **search.metadata,
+                "smallest_discriminative_unit": search.smallest_discriminative_unit,
+            }
             connection.execute(
                 """
                 INSERT INTO search_records (
@@ -454,7 +466,7 @@ class Repository:
                     search.rationale,
                     search.status.value,
                     compact_json(search.findings),
-                    compact_json(search.metadata),
+                    compact_json(metadata),
                     search.created_at.isoformat(),
                     search.updated_at.isoformat(),
                 ),
@@ -462,6 +474,12 @@ class Repository:
 
         connection.execute("DELETE FROM basin_records WHERE run_id = ?", (run_id,))
         for basin in run_state.state.basins:
+            metadata = {
+                **basin.metadata,
+                "explanatory_burden": basin.explanatory_burden,
+                "weakening_conditions": basin.weakening_conditions,
+                "discriminator_path": basin.discriminator_path,
+            }
             connection.execute(
                 """
                 INSERT INTO basin_records (
@@ -480,7 +498,7 @@ class Repository:
                     compact_json(basin.preserves),
                     compact_json(basin.conflicts),
                     basin.discriminator,
-                    compact_json(basin.metadata),
+                    compact_json(metadata),
                     basin.created_at.isoformat(),
                     basin.updated_at.isoformat(),
                 ),
@@ -543,9 +561,10 @@ class Repository:
                 INSERT INTO runs (
                     id, project_id, title, mode, status, durability_mode, scope_summary,
                     active_regimes_json, current_transition, current_discriminator,
-                    last_sweep_status, last_blast_radius_json, run_state_json, summary_json,
-                    created_at, updated_at, last_synced_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    last_sweep_status, last_blast_radius_json, run_class, current_phase,
+                    next_gating_condition, last_supersession_json, applicability_json,
+                    run_state_json, summary_json, created_at, updated_at, last_synced_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     project_id = excluded.project_id,
                     title = excluded.title,
@@ -558,6 +577,11 @@ class Repository:
                     current_discriminator = excluded.current_discriminator,
                     last_sweep_status = excluded.last_sweep_status,
                     last_blast_radius_json = excluded.last_blast_radius_json,
+                    run_class = excluded.run_class,
+                    current_phase = excluded.current_phase,
+                    next_gating_condition = excluded.next_gating_condition,
+                    last_supersession_json = excluded.last_supersession_json,
+                    applicability_json = excluded.applicability_json,
                     run_state_json = excluded.run_state_json,
                     summary_json = excluded.summary_json,
                     updated_at = excluded.updated_at,
@@ -576,6 +600,15 @@ class Repository:
                     run_state.state.current_discriminator,
                     run_state.state.current_sweep_status.status,
                     compact_json([impact.model_dump(mode="json") for impact in run_state.state.current_blast_radius]),
+                    run_state.metadata.run_class.value,
+                    run_state.state.current_phase.value,
+                    run_state.state.next_gating_condition,
+                    compact_json(
+                        run_state.state.last_supersession.model_dump(mode="json")
+                        if run_state.state.last_supersession
+                        else {}
+                    ),
+                    compact_json(run_state.state.applicability.model_dump(mode="json")),
                     compact_json(payload),
                     compact_json((summary or SummaryBundle()).model_dump(mode="json")),
                     timestamp,
@@ -590,8 +623,9 @@ class Repository:
                     """
                     INSERT INTO typed_claims (
                         id, project_id, run_id, statement, provenance_tag, load_bearing, structural_role,
-                        confidence, durability_class, evidence_json, notes_json, source, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        confidence, durability_class, confidence_axes_json, scaffold_json,
+                        evidence_json, notes_json, source, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         claim.id or self._new_id("claim"),
@@ -603,6 +637,8 @@ class Repository:
                         claim.structural_role,
                         claim.confidence.value,
                         claim.durability_class.value,
+                        compact_json(claim.confidence_axes.model_dump(mode="json")),
+                        compact_json(claim.scaffold_boundary.model_dump(mode="json") if claim.scaffold_boundary else {}),
                         compact_json(claim.evidence),
                         compact_json(claim.notes),
                         claim.source,
@@ -1040,6 +1076,7 @@ class Repository:
                 nearly_covers=_loads(row["nearly_covers_json"], []),
                 insufficient_because=row["insufficient_because"],
                 dissolved_by=_loads(row["dissolved_by_json"], []),
+                smallest_discriminative_unit=_loads(row["metadata_json"], {}).get("smallest_discriminative_unit", ""),
                 discriminator=row["discriminator"],
                 blocking=bool(row["blocking"]),
                 status=row["status"],
@@ -1065,6 +1102,7 @@ class Repository:
                 id=row["id"],
                 query=row["query"],
                 target_object=row["target_object"],
+                smallest_discriminative_unit=_loads(row["metadata_json"], {}).get("smallest_discriminative_unit", ""),
                 rationale=row["rationale"],
                 status=SearchStatus(row["status"]),
                 findings=_loads(row["findings_json"], []),
@@ -1095,6 +1133,9 @@ class Repository:
                 status=row["status"],
                 preserves=_loads(row["preserves_json"], []),
                 conflicts=_loads(row["conflicts_json"], []),
+                explanatory_burden=_loads(row["metadata_json"], {}).get("explanatory_burden", []),
+                weakening_conditions=_loads(row["metadata_json"], {}).get("weakening_conditions", []),
+                discriminator_path=_loads(row["metadata_json"], {}).get("discriminator_path", []),
                 discriminator=row["discriminator"],
                 metadata=_loads(row["metadata_json"], {}),
                 created_at=_parse_datetime(row["created_at"]),
@@ -1220,6 +1261,14 @@ class Repository:
     def upsert_anchor(self, project_id: str | None, run_id: str | None, anchor: Anchor) -> Anchor:
         anchor_id = anchor.id or self._new_id("anchor")
         payload = anchor.model_copy(update={"id": anchor_id, "updated_at": datetime.fromisoformat(utc_now_iso())})
+        metadata = {
+            **payload.metadata,
+            "weakening_conditions": payload.weakening_conditions,
+            "explanatory_burden": payload.explanatory_burden,
+            "scaffold_boundary": payload.scaffold_boundary.model_dump(mode="json") if payload.scaffold_boundary else None,
+            "user_promoted": payload.user_promoted,
+            "sweep_survival_count": payload.sweep_survival_count,
+        }
         with self.database.transaction() as connection:
             connection.execute(
                 """
@@ -1259,7 +1308,7 @@ class Repository:
                     payload.rationale,
                     compact_json(payload.dependencies),
                     compact_json(payload.implications),
-                    compact_json(payload.metadata),
+                    compact_json(metadata),
                     payload.invalidated_by,
                     payload.created_at.isoformat(),
                     payload.updated_at.isoformat(),
@@ -1301,6 +1350,15 @@ class Repository:
                 rationale=row["rationale"],
                 dependencies=_loads(row["dependencies_json"], []),
                 implications=_loads(row["implications_json"], []),
+                weakening_conditions=_loads(row["metadata_json"], {}).get("weakening_conditions", []),
+                explanatory_burden=_loads(row["metadata_json"], {}).get("explanatory_burden", []),
+                scaffold_boundary=(
+                    ScaffoldBoundary.model_validate(_loads(row["metadata_json"], {}).get("scaffold_boundary"))
+                    if _loads(row["metadata_json"], {}).get("scaffold_boundary")
+                    else None
+                ),
+                user_promoted=bool(_loads(row["metadata_json"], {}).get("user_promoted", False)),
+                sweep_survival_count=int(_loads(row["metadata_json"], {}).get("sweep_survival_count", 0)),
                 metadata=_loads(row["metadata_json"], {}),
                 invalidated_by=row["invalidated_by"],
                 created_at=_parse_datetime(row["created_at"]),
@@ -1335,6 +1393,15 @@ class Repository:
             rationale=reason,
             dependencies=_loads(row["dependencies_json"], []),
             implications=_loads(row["implications_json"], []),
+            weakening_conditions=_loads(row["metadata_json"], {}).get("weakening_conditions", []),
+            explanatory_burden=_loads(row["metadata_json"], {}).get("explanatory_burden", []),
+            scaffold_boundary=(
+                ScaffoldBoundary.model_validate(_loads(row["metadata_json"], {}).get("scaffold_boundary"))
+                if _loads(row["metadata_json"], {}).get("scaffold_boundary")
+                else None
+            ),
+            user_promoted=bool(_loads(row["metadata_json"], {}).get("user_promoted", False)),
+            sweep_survival_count=int(_loads(row["metadata_json"], {}).get("sweep_survival_count", 0)),
             metadata=_loads(row["metadata_json"], {}),
             invalidated_by=invalidated_by,
             created_at=_parse_datetime(row["created_at"]),
@@ -1483,6 +1550,12 @@ class Repository:
         payload = hypothesis.model_copy(
             update={"id": hypothesis_id, "updated_at": datetime.fromisoformat(utc_now_iso())}
         )
+        metadata = {
+            **payload.metadata,
+            "weakening_conditions": payload.weakening_conditions,
+            "discriminator_path": payload.discriminator_path,
+            "explanatory_burden": payload.explanatory_burden,
+        }
         with self.database.transaction() as connection:
             connection.execute(
                 """
@@ -1516,7 +1589,7 @@ class Repository:
                     compact_json(payload.preserves),
                     compact_json(payload.risks),
                     compact_json(payload.discriminators),
-                    compact_json(payload.metadata),
+                    compact_json(metadata),
                     payload.created_at.isoformat(),
                     payload.updated_at.isoformat(),
                 ),
@@ -1552,6 +1625,9 @@ class Repository:
                 preserves=_loads(row["preserves_json"], []),
                 risks=_loads(row["risks_json"], []),
                 discriminators=_loads(row["discriminators_json"], []),
+                weakening_conditions=_loads(row["metadata_json"], {}).get("weakening_conditions", []),
+                discriminator_path=_loads(row["metadata_json"], {}).get("discriminator_path", []),
+                explanatory_burden=_loads(row["metadata_json"], {}).get("explanatory_burden", []),
                 metadata=_loads(row["metadata_json"], {}),
                 created_at=_parse_datetime(row["created_at"]),
                 updated_at=_parse_datetime(row["updated_at"]),
@@ -1563,7 +1639,8 @@ class Repository:
         rows = self.database.connection.execute(
             """
             SELECT id, statement, provenance_tag, load_bearing, structural_role, confidence,
-                   durability_class, evidence_json, notes_json, source, created_at, updated_at
+                   durability_class, confidence_axes_json, scaffold_json,
+                   evidence_json, notes_json, source, created_at, updated_at
             FROM typed_claims
             WHERE run_id = ?
             ORDER BY updated_at DESC
@@ -1579,6 +1656,12 @@ class Repository:
                 structural_role=row["structural_role"],
                 confidence=row["confidence"],
                 durability_class=DurabilityClass(row["durability_class"]),
+                confidence_axes=ConfidenceAxes.model_validate(_loads(row["confidence_axes_json"], {})),
+                scaffold_boundary=(
+                    ScaffoldBoundary.model_validate(_loads(row["scaffold_json"], {}))
+                    if _loads(row["scaffold_json"], {})
+                    else None
+                ),
                 evidence=_loads(row["evidence_json"], []),
                 notes=_loads(row["notes_json"], []),
                 source=row["source"],
@@ -1619,6 +1702,10 @@ class Repository:
         payload = discriminator.model_copy(
             update={"id": discriminator_id, "updated_at": datetime.fromisoformat(utc_now_iso())}
         )
+        metadata = {
+            **payload.metadata,
+            "expected_outcome_map": payload.expected_outcome_map,
+        }
         with self.database.transaction() as connection:
             connection.execute(
                 """
@@ -1646,7 +1733,7 @@ class Repository:
                     compact_json(payload.target),
                     payload.best_next_probe,
                     payload.confidence_gain,
-                    compact_json(payload.metadata),
+                    compact_json(metadata),
                     payload.created_at.isoformat(),
                     payload.updated_at.isoformat(),
                 ),
@@ -1679,6 +1766,7 @@ class Repository:
                 target=_loads(row["target_json"], []),
                 best_next_probe=row["best_next_probe"],
                 confidence_gain=row["confidence_gain"],
+                expected_outcome_map=_loads(row["metadata_json"], {}).get("expected_outcome_map", {}),
                 metadata=_loads(row["metadata_json"], {}),
                 created_at=_parse_datetime(row["created_at"]),
                 updated_at=_parse_datetime(row["updated_at"]),

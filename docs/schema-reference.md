@@ -30,10 +30,18 @@ The live PSI vector is stored in `PsiRunState`:
 - `T`: timescale bands
 - `S`: substrate constraints
 - `G`: stance geometry
+- `applicability`: Phase 0 method-fit boundary
+- `current_phase`: active re-entrant regime
+- `phase_history`: regime re-entry history
+- `next_gating_condition`: next explicit control obligation
+- `open_artifacts`: missing or non-authoritative artifact surfaces
+- `last_supersession`: latest supersession event, if any
+- `smallest_discriminative_unit`: smallest unresolved unit currently targeted
 
 Additional run-state fields:
 
-- schema metadata version (`1.1.0`) in machine-readable exports
+- schema metadata version (`1.2.0`) in machine-readable exports
+- run class metadata (`exploratory | working | canonical`)
 - active regimes
 - current blast radius
 - current sweep status
@@ -44,6 +52,15 @@ Additional run-state fields:
 - transition
 - compliance
 - uncertainty
+
+Typed substructures now also carry:
+
+- typed-claim confidence axes (`evidence`, `causal`, `scope`, `representation`)
+- optional scaffold-boundary metadata on typed claims and anchors
+- hypothesis weakening conditions, discriminator paths, and explanatory burden
+- discriminator expected-outcome maps
+- gap/search smallest discriminative unresolved units
+- basin burden, weakening, and discriminator-path fields
 
 ## Persistence Tables
 

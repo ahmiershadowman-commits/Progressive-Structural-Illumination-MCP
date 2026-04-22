@@ -7,10 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _expand_path(value: str | os.PathLike[str]) -> Path:
+    return Path(os.path.expanduser(os.path.expandvars(str(value))))
+
+
 def _default_data_dir() -> Path:
     local_app_data = os.getenv("LOCALAPPDATA")
     if local_app_data:
-        return Path(local_app_data) / "psi-coprocessor-mcp"
+        return _expand_path(local_app_data) / "psi-coprocessor-mcp"
     return Path.home() / ".psi-coprocessor-mcp"
 
 
@@ -36,9 +40,9 @@ class ServerSettings:
 
     @classmethod
     def from_env(cls) -> "ServerSettings":
-        data_dir = Path(os.getenv("PSI_MCP_DATA_DIR", _default_data_dir()))
-        database_path = Path(os.getenv("PSI_MCP_DB_PATH", data_dir / "psi.sqlite3"))
-        export_dir = Path(os.getenv("PSI_MCP_EXPORT_DIR", data_dir / "exports"))
+        data_dir = _expand_path(os.getenv("PSI_MCP_DATA_DIR", _default_data_dir()))
+        database_path = _expand_path(os.getenv("PSI_MCP_DB_PATH", data_dir / "psi.sqlite3"))
+        export_dir = _expand_path(os.getenv("PSI_MCP_EXPORT_DIR", data_dir / "exports"))
         default_durability_mode = os.getenv("PSI_MCP_DURABILITY_MODE", "blocking").lower()
         http_host = os.getenv("PSI_MCP_HTTP_HOST", "127.0.0.1")
         http_port = int(os.getenv("PSI_MCP_HTTP_PORT", "8765"))

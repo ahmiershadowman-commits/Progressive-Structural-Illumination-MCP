@@ -9,7 +9,9 @@ Status labels:
 
 ## Summary
 
-The build-contract surface is implemented.
+The contract-required server surface is implemented.
+
+The remaining caveats documented below are bounded implementation choices, not omitted contract subsystems.
 
 The server now includes:
 
@@ -85,7 +87,7 @@ Residual limitations are not missing subsystems. They are bounded implementation
 | Provenance tags include `OBSERVED/INFERRED/CONSTRUCTED/SPECULATIVE/UNKNOWN` | IMPLEMENTED | Present and used. |
 | Exposure operator support | IMPLEMENTED | Present in operator detection and typed primitive operators. |
 | Questions act as operators in routing | IMPLEMENTED | Question events and operator-family detection both affect routing. |
-| Resolution / transition tags | PARTIAL | Transition is explicit; `ROLLBACK_REQUIRED` remains the persisted status label while the transition decision stays `ROLLBACK`. |
+| Resolution / transition tags | IMPLEMENTED | Transition now uses `ROLLBACK_REQUIRED`; legacy input `ROLLBACK` is accepted as a compatibility alias. |
 
 ### Methodology ontology
 
@@ -163,7 +165,7 @@ Residual limitations are not missing subsystems. They are bounded implementation
 | Advisory mode | IMPLEMENTED | Present. |
 | Blocking mode | IMPLEMENTED | Present. |
 | Distinguish durability from confidence | IMPLEMENTED | Present. |
-| Temporary scaffolds only when explicit and bounded | PARTIAL | Represented through durability classes and compliance rather than a dedicated sandbox-boundary object. |
+| Temporary scaffolds only when explicit and bounded | IMPLEMENTED | Typed scaffold-boundary state is present on claims/anchors and enforced in compliance/stress. |
 
 ### AI collaboration contract
 
@@ -182,7 +184,7 @@ Residual limitations are not missing subsystems. They are bounded implementation
 | Run-state store | IMPLEMENTED | `runs.run_state_json`. |
 | Artifact/log store | IMPLEMENTED | Present. |
 | Retrieval index | IMPLEMENTED | FTS5. |
-| Migrations | IMPLEMENTED | Five migrations, including methodology ontology. |
+| Migrations | IMPLEMENTED | Six migrations, including methodology ontology and the control-surface extension. |
 | Atomic writes / rollback-safe updates | IMPLEMENTED | SQLite transaction boundaries. |
 | Deterministic regeneration of artifacts from live state | IMPLEMENTED | Present. |
 | Sync between live run-state and artifact snapshots | IMPLEMENTED | Present and tested. |

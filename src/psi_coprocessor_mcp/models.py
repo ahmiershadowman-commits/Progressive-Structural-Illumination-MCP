@@ -34,7 +34,7 @@ class RunStatus(str, Enum):
 
 class TransitionDecision(str, Enum):
     ANCHOR = "ANCHOR"
-    ROLLBACK = "ROLLBACK"
+    ROLLBACK_REQUIRED = "ROLLBACK_REQUIRED"
     RESCOPE = "RESCOPE"
     ESCALATE = "ESCALATE"
     CONTINUE = "CONTINUE"
@@ -89,6 +89,12 @@ class ConfidenceLevel(str, Enum):
     WEAK = "weak"
     PROVISIONAL = "provisional"
     UNRESOLVED = "unresolved"
+
+
+class RunClass(str, Enum):
+    EXPLORATORY = "exploratory"
+    WORKING = "working"
+    CANONICAL = "canonical"
 
 
 class MemoryLane(str, Enum):
@@ -344,6 +350,46 @@ class SubstrateConstraints(PSIModel):
 class UncertaintyState(PSIModel):
     propagation_limits: list[str] = Field(default_factory=list)
     evidence_limits: list[str] = Field(default_factory=list)
+    partial_propagation_warnings: list[str] = Field(default_factory=list)
+
+
+class ConfidenceAxes(PSIModel):
+    evidence_confidence: ConfidenceLevel = ConfidenceLevel.PROVISIONAL
+    causal_confidence: ConfidenceLevel = ConfidenceLevel.PROVISIONAL
+    scope_confidence: ConfidenceLevel = ConfidenceLevel.PROVISIONAL
+    representation_confidence: ConfidenceLevel = ConfidenceLevel.PROVISIONAL
+
+
+class ScaffoldBoundary(PSIModel):
+    label: str = ""
+    bounded: bool = False
+    boundary: str = ""
+    exit_condition: str = ""
+    substitute_for_real_structure: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+
+class ApplicabilityAssessment(PSIModel):
+    applicable: bool = True
+    rationale: str = ""
+    boundaries: list[str] = Field(default_factory=list)
+    failure_modes: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class PhaseRecord(PSIModel):
+    regime: Regime
+    reason: str = ""
+    trigger: str = ""
+    entered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class SupersessionSnapshot(PSIModel):
+    entity_type: str = ""
+    entity_id: str = ""
+    superseded_by: str = ""
+    reason: str = ""
+    created_at: str = ""
 
 
 class VisibilityEvent(PSIModel):
@@ -376,6 +422,11 @@ class Anchor(PSIModel):
     rationale: str = ""
     dependencies: list[str] = Field(default_factory=list)
     implications: list[str] = Field(default_factory=list)
+    weakening_conditions: list[str] = Field(default_factory=list)
+    explanatory_burden: list[str] = Field(default_factory=list)
+    scaffold_boundary: ScaffoldBoundary | None = None
+    user_promoted: bool = False
+    sweep_survival_count: int = 0
     metadata: dict[str, object] = Field(default_factory=dict)
     invalidated_by: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -415,6 +466,9 @@ class Hypothesis(PSIModel):
     changes: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     discriminators: list[str] = Field(default_factory=list)
+    weakening_conditions: list[str] = Field(default_factory=list)
+    discriminator_path: list[str] = Field(default_factory=list)
+    explanatory_burden: list[str] = Field(default_factory=list)
     metadata: dict[str, object] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -427,6 +481,7 @@ class Discriminator(PSIModel):
     target: list[str] = Field(default_factory=list)
     best_next_probe: str = ""
     confidence_gain: float = 0.5
+    expected_outcome_map: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, object] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -477,6 +532,8 @@ class TypedClaim(PSIModel):
     structural_role: str = ""
     confidence: ConfidenceLevel = ConfidenceLevel.PROVISIONAL
     durability_class: DurabilityClass = DurabilityClass.UNKNOWN
+    confidence_axes: ConfidenceAxes = Field(default_factory=ConfidenceAxes)
+    scaffold_boundary: ScaffoldBoundary | None = None
     evidence: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     source: str = ""
@@ -645,6 +702,7 @@ class GapRecord(PSIModel):
     nearly_covers: list[str] = Field(default_factory=list)
     insufficient_because: str = ""
     dissolved_by: list[str] = Field(default_factory=list)
+    smallest_discriminative_unit: str = ""
     discriminator: str = ""
     blocking: bool = False
     status: str = "OPEN"
@@ -657,6 +715,7 @@ class SearchRecord(PSIModel):
     id: str = ""
     query: str
     target_object: str = ""
+    smallest_discriminative_unit: str = ""
     rationale: str = ""
     status: SearchStatus = SearchStatus.PLANNED
     findings: list[str] = Field(default_factory=list)
@@ -673,6 +732,9 @@ class BasinRecord(PSIModel):
     status: str = "OPEN"
     preserves: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
+    explanatory_burden: list[str] = Field(default_factory=list)
+    weakening_conditions: list[str] = Field(default_factory=list)
+    discriminator_path: list[str] = Field(default_factory=list)
     discriminator: str = ""
     metadata: dict[str, object] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -812,6 +874,7 @@ class RunMetadata(PSIModel):
     title: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     mode: RunMode = RunMode.SURVEY
+    run_class: RunClass = RunClass.EXPLORATORY
     status: RunStatus = RunStatus.OPEN
     durability_mode: DurabilityMode = DurabilityMode.BLOCKING
 
@@ -843,6 +906,13 @@ class RunStateVector(PSIModel):
     T: TimescaleBands = Field(default_factory=TimescaleBands)
     S: SubstrateConstraints = Field(default_factory=SubstrateConstraints)
     G: StanceGeometry = Field(default_factory=StanceGeometry)
+    applicability: ApplicabilityAssessment = Field(default_factory=ApplicabilityAssessment)
+    current_phase: Regime = Regime.TASK_CONTRACT_SCOPE_LOCK
+    phase_history: list[PhaseRecord] = Field(default_factory=list)
+    next_gating_condition: str = ""
+    open_artifacts: list[ArtifactType] = Field(default_factory=list)
+    last_supersession: SupersessionSnapshot | None = None
+    smallest_discriminative_unit: str = ""
     active_regimes: list[Regime] = Field(default_factory=lambda: [Regime.TASK_CONTRACT_SCOPE_LOCK])
     current_blast_radius: list[BlastRadiusImpact] = Field(default_factory=list)
     current_sweep_status: SweepState = Field(default_factory=SweepState)
@@ -869,11 +939,12 @@ class PsiRunState(PSIModel):
         return {
             "psi_run": {
                 "metadata": {
-                    "schema_version": "1.1.0",
+                    "schema_version": "1.2.0",
                     "run_id": self.metadata.run_id,
                     "project_id": self.metadata.project_id,
                     "timestamp": self.metadata.timestamp.isoformat(),
                     "mode": self.metadata.mode.value,
+                    "run_class": self.metadata.run_class.value,
                     "status": self.metadata.status.value,
                     "durability_mode": self.metadata.durability_mode.value,
                 },
@@ -912,6 +983,15 @@ class PsiRunState(PSIModel):
                     "operator_families": [operator.value for operator in self.state.active_operators],
                     "control_families": [family.model_dump(mode="json") for family in self.state.control_families],
                     "friction_routing": [routing.model_dump(mode="json") for routing in self.state.friction_routing],
+                    "applicability": self.state.applicability.model_dump(mode="json"),
+                    "current_phase": self.state.current_phase.value,
+                    "phase_history": [entry.model_dump(mode="json") for entry in self.state.phase_history],
+                    "next_gating_condition": self.state.next_gating_condition,
+                    "open_artifacts": [artifact.value for artifact in self.state.open_artifacts],
+                    "last_supersession": self.state.last_supersession.model_dump(mode="json")
+                    if self.state.last_supersession
+                    else None,
+                    "smallest_discriminative_unit": self.state.smallest_discriminative_unit,
                     "transition": self.state.transition.model_dump(mode="json"),
                     "compliance": self.state.compliance.model_dump(mode="json") if self.state.compliance else None,
                     "uncertainty": self.state.uncertainty.model_dump(mode="json"),
@@ -966,4 +1046,4 @@ class ExportManifest(PSIModel):
     exported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     files: list[str] = Field(default_factory=list)
     checksums: dict[str, str] = Field(default_factory=dict)
-    schema_version: str = "1.1.0"
+    schema_version: str = "1.2.0"

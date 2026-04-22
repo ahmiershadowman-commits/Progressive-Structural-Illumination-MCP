@@ -12,7 +12,9 @@ import yaml
 from .config import ServerSettings
 from .models import (
     Anchor,
+    ApplicabilityAssessment,
     ArtifactPointers,
+    ArtifactType,
     BlastRadiusImpact,
     ComplianceReport,
     ConfidenceLevel,
@@ -25,16 +27,20 @@ from .models import (
     FrictionType,
     MemoryEntry,
     MemoryLane,
+    PhaseRecord,
     ProjectSummary,
     PsiRunState,
     Regime,
     RetrievalHit,
     RunMetadata,
+    RunClass,
     RunMode,
     RunStateVector,
     RunStatus,
+    ScaffoldBoundary,
     SourceObject,
     SummaryBundle,
+    SupersessionSnapshot,
     Tension,
     TransitionDecision,
     TransitionState,
@@ -45,6 +51,7 @@ from .models import Hypothesis as PsiHypothesis
 from .repository import Repository
 from .runtime.analysis import (
     AnalysisPayload,
+    assess_applicability,
     assess_durability,
     build_analysis_payload,
     choose_best_discriminator,
@@ -297,6 +304,11 @@ class PsiService:
                     else []
                 ),
                 *(
+                    [Regime.TASK_CONTRACT_SCOPE_LOCK]
+                    if compliance.requested_action == "rescope"
+                    else []
+                ),
+                *(
                     [
                         Regime.SOURCE_GROUNDING,
                         Regime.PRIMITIVE_STABILIZATION,
@@ -320,7 +332,7 @@ class PsiService:
         rationale = transition.rationale
         if compliance.requested_action == "rollback" and compliance.blocking:
             return TransitionState(
-                decision=TransitionDecision.ROLLBACK,
+                decision=TransitionDecision.ROLLBACK_REQUIRED,
                 rationale=f"{transition.rationale} PSI compliance also requires rollback before stable continuation.",
                 blocking_reasons=blocking_reasons,
                 recommended_regimes=recommended_regimes,
@@ -329,6 +341,13 @@ class PsiService:
             return TransitionState(
                 decision=TransitionDecision.CONTINUE,
                 rationale=f"{transition.rationale} PSI compliance requires another weighted coherence sweep before closure.",
+                blocking_reasons=blocking_reasons,
+                recommended_regimes=recommended_regimes,
+            )
+        if compliance.requested_action == "rescope" and compliance.blocking:
+            return TransitionState(
+                decision=TransitionDecision.RESCOPE,
+                rationale=f"{transition.rationale} PSI compliance requires Phase 0 rescoping before stable continuation.",
                 blocking_reasons=blocking_reasons,
                 recommended_regimes=recommended_regimes,
             )
@@ -344,7 +363,7 @@ class PsiService:
     def _status_from_transition(self, decision: TransitionDecision) -> RunStatus:
         mapping = {
             TransitionDecision.ANCHOR: RunStatus.PARTIALLY_RESOLVED,
-            TransitionDecision.ROLLBACK: RunStatus.ROLLBACK_REQUIRED,
+            TransitionDecision.ROLLBACK_REQUIRED: RunStatus.ROLLBACK_REQUIRED,
             TransitionDecision.RESCOPE: RunStatus.SCOPE,
             TransitionDecision.ESCALATE: RunStatus.PARAMETRIC,
             TransitionDecision.CONTINUE: RunStatus.OPEN,
@@ -386,6 +405,109 @@ class PsiService:
                 merged.append(item)
         return merged
 
+    def _parse_transition_decision(self, decision: str | TransitionDecision) -> TransitionDecision:
+        if isinstance(decision, TransitionDecision):
+            return decision
+        normalized = decision.strip().upper()
+        if normalized == "ROLLBACK":
+            normalized = TransitionDecision.ROLLBACK_REQUIRED.value
+        return TransitionDecision(normalized)
+
+    def _infer_run_class(self, run_state: PsiRunState) -> RunClass:
+        stable = (
+            run_state.state.transition.decision in {TransitionDecision.ANCHOR, TransitionDecision.HALT}
+            and not run_state.state.open_artifacts
+            and bool(run_state.state.sources)
+            and bool(run_state.state.components)
+            and bool(run_state.state.state_variables)
+            and bool(run_state.state.primitive_operators)
+            and bool(run_state.state.interlocks)
+            and bool(run_state.state.traces)
+            and bool(run_state.state.basins)
+            and not (run_state.state.compliance and run_state.state.compliance.blocking)
+        )
+        if stable:
+            return RunClass.CANONICAL
+        if (
+            run_state.state.components
+            or run_state.state.interlocks
+            or run_state.state.traces
+            or run_state.state.gaps
+            or run_state.state.basins
+        ):
+            return RunClass.WORKING
+        return RunClass.EXPLORATORY
+
+    def _next_gating_condition(self, run_state: PsiRunState) -> str:
+        if run_state.state.compliance and run_state.state.compliance.requested_action:
+            return run_state.state.compliance.requested_action
+        if not run_state.state.applicability.applicable:
+            return "rescope_or_halt_on_method_fit"
+        if run_state.state.N.blocked:
+            return "clear_durability_poison"
+        if run_state.state.open_artifacts:
+            return "sync_open_artifacts"
+        if any(gap.blocking for gap in run_state.state.gaps):
+            return "reduce_smallest_discriminative_unit"
+        if run_state.state.uncertainty.propagation_limits:
+            return "state_partial_propagation_limits"
+        if run_state.state.transition.decision in {TransitionDecision.ANCHOR, TransitionDecision.HALT}:
+            return "stable_output_ready"
+        if run_state.state.current_discriminator:
+            return f"probe::{run_state.state.current_discriminator}"
+        return "continue_re-entrant_pass"
+
+    def _select_smallest_discriminative_unit(self, run_state: PsiRunState) -> str:
+        for gap in run_state.state.gaps:
+            if gap.blocking and gap.smallest_discriminative_unit:
+                return gap.smallest_discriminative_unit
+        for search in run_state.state.searches:
+            if search.smallest_discriminative_unit:
+                return search.smallest_discriminative_unit
+        return ""
+
+    def _update_phase_history(self, run_state: PsiRunState, reason: str = "", trigger: str = "") -> None:
+        current_phase = run_state.state.active_regimes[0] if run_state.state.active_regimes else Regime.TASK_CONTRACT_SCOPE_LOCK
+        previous = run_state.state.phase_history[-1].regime if run_state.state.phase_history else None
+        run_state.state.current_phase = current_phase
+        if previous != current_phase:
+            run_state.state.phase_history.append(
+                PhaseRecord(
+                    regime=current_phase,
+                    reason=reason,
+                    trigger=trigger,
+                )
+            )
+
+    def _refresh_control_state(
+        self,
+        run_state: PsiRunState,
+        artifacts: list[object] | None = None,
+        phase_reason: str = "",
+        trigger: str = "",
+    ) -> None:
+        artifact_snapshots = artifacts if artifacts is not None else self.repository.list_artifacts(run_state.metadata.run_id)
+        available = {artifact.artifact_type for artifact in artifact_snapshots}
+        open_artifacts = [artifact for artifact in ArtifactType if artifact not in available]
+        open_artifacts.extend(
+            artifact.artifact_type
+            for artifact in artifact_snapshots
+            if not artifact.authoritative and artifact.artifact_type not in open_artifacts
+        )
+        run_state.state.open_artifacts = open_artifacts
+        supersessions = self.repository.list_supersession_history(run_state.metadata.run_id)
+        if supersessions:
+            run_state.state.last_supersession = SupersessionSnapshot.model_validate(supersessions[0])
+        else:
+            run_state.state.last_supersession = None
+        run_state.state.smallest_discriminative_unit = self._select_smallest_discriminative_unit(run_state)
+        run_state.state.uncertainty.partial_propagation_warnings = [
+            f"partial::{limit}" for limit in run_state.state.uncertainty.propagation_limits
+        ]
+        self._update_phase_history(run_state, reason=phase_reason, trigger=trigger)
+        run_state.state.next_gating_condition = self._next_gating_condition(run_state)
+        run_state.metadata.run_class = self._infer_run_class(run_state)
+
     def start_run(
         self,
         title: str,
@@ -398,7 +520,8 @@ class PsiService:
         durability_mode: str | None = None,
     ) -> dict[str, object]:
         if run_id:
-            run_state = self.repository.get_run_state(run_id)
+            run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+            self._refresh_control_state(run_state)
             return {
                 "project_id": run_state.metadata.project_id,
                 "run_id": run_state.metadata.run_id,
@@ -416,6 +539,7 @@ class PsiService:
                 project_id=project.project_id if project else None,
                 title=title,
                 mode=run_mode,
+                run_class=RunClass.EXPLORATORY,
                 status=RunStatus.OPEN,
                 durability_mode=self._effective_durability_mode(durability_mode),
             ),
@@ -424,6 +548,7 @@ class PsiService:
                 B=infer_scope(payload),
                 T=infer_timescale_bands(payload),
                 S=infer_substrate_constraints(payload),
+                applicability=assess_applicability(payload),
             ),
         )
         self._apply_runtime_control_surface(
@@ -436,6 +561,12 @@ class PsiService:
         self._refresh_methodology_objects(run_state, payload, [])
         source_audit = self._audit_sources(run_state)
         run_state.state.W.notes = self._merge_scope(run_state.state.W.notes, [f"source_audit={source_audit}"])
+        self._refresh_control_state(
+            run_state,
+            artifacts=[],
+            phase_reason="run started",
+            trigger="start_run",
+        )
         summary = SummaryBundle(
             expert_summary=f"Run opened for {title}",
             plain_summary=f"Started PSI run for {title}.",
@@ -476,14 +607,20 @@ class PsiService:
     def get_run_state(self, run_id: str) -> dict[str, object]:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
         summary = self.repository.get_run_summary(run_id)
+        self._refresh_control_state(run_state)
         compact = {
             "run_id": run_state.metadata.run_id,
             "project_id": run_state.metadata.project_id,
             "mode": run_state.metadata.mode.value,
+            "run_class": run_state.metadata.run_class.value,
             "status": run_state.metadata.status.value,
             "transition": run_state.state.transition.decision.value,
+            "current_phase": run_state.state.current_phase.value,
             "active_regimes": [regime.value for regime in run_state.state.active_regimes],
+            "open_artifacts": [artifact.value for artifact in run_state.state.open_artifacts],
+            "next_gating_condition": run_state.state.next_gating_condition,
             "best_discriminator": run_state.state.current_discriminator,
+            "smallest_discriminative_unit": run_state.state.smallest_discriminative_unit,
             "compliance_status": run_state.state.compliance.status if run_state.state.compliance else "UNKNOWN",
             "summary": summary.compact_summary,
         }
@@ -521,6 +658,7 @@ class PsiService:
         durability = assess_durability(payload, run_state.metadata.durability_mode)
         lens = infer_lens(payload)
         scope = infer_scope(payload)
+        applicability = assess_applicability(payload)
         articulation = summarize_local_articulation(payload)
         probes = suggest_probes(frictions, payload, articulation)
         best_discriminator = choose_best_discriminator(frictions, probes)
@@ -531,6 +669,7 @@ class PsiService:
         run_state.state.F = frictions
         run_state.state.N = durability
         run_state.state.L = lens
+        run_state.state.applicability = applicability
         run_state.state.B.included = self._merge_scope(run_state.state.B.included, scope.included)
         run_state.state.B.excluded = self._merge_scope(run_state.state.B.excluded, scope.excluded)
         run_state.state.B.success_criteria = self._merge_scope(run_state.state.B.success_criteria, scope.success_criteria)
@@ -573,6 +712,13 @@ class PsiService:
             scope_shift_detected=scope_shift_detected,
             uncertainty_limits=uncertainty_limits,
         )
+        if not applicability.applicable:
+            transition = TransitionState(
+                decision=TransitionDecision.RESCOPE,
+                rationale="Phase 0 applicability check says PSI is not a clean fit for the current target without rescoping.",
+                blocking_reasons=applicability.failure_modes[:4],
+                recommended_regimes=[Regime.TASK_CONTRACT_SCOPE_LOCK],
+            )
         self._apply_runtime_control_surface(
             run_state=run_state,
             payload=payload,
@@ -635,6 +781,12 @@ class PsiService:
             metadata={"best_discriminator": best_discriminator},
         )
         run_state.state.current_sweep_status.trigger_event_id = stored_primary_event.id if stored_primary_event else None
+        self._refresh_control_state(
+            run_state,
+            artifacts=existing_artifacts,
+            phase_reason="reflect pass completed",
+            trigger=primary_event.type.value,
+        )
         strongest_tension = self._strongest_live_tension(run_state)
         summary = generate_summary_bundle(
             run_state=run_state,
@@ -647,9 +799,11 @@ class PsiService:
         return {
             "project_id": run_state.metadata.project_id,
             "run_id": run_state.metadata.run_id,
+            "run_class": run_state.metadata.run_class.value,
             "detected_visibility_events": [event.model_dump(mode="json") for event in persisted_events],
             "active_lens_summary": run_state.state.L.model_dump(mode="json"),
             "friction_types": [signal.friction_type.value for signal in frictions],
+            "applicability": run_state.state.applicability.model_dump(mode="json"),
             "source_objects": [source.model_dump(mode="json") for source in run_state.state.sources],
             "source_audit": source_audit,
             "typed_claims": [claim.model_dump(mode="json") for claim in run_state.state.C],
@@ -676,7 +830,14 @@ class PsiService:
             "durability_assessment": durability.model_dump(mode="json"),
             "transition_recommendation": transition.model_dump(mode="json"),
             "compliance_report": compliance.model_dump(mode="json"),
+            "current_phase": run_state.state.current_phase.value,
+            "open_artifacts": [artifact.value for artifact in run_state.state.open_artifacts],
+            "next_gating_condition": run_state.state.next_gating_condition,
+            "last_supersession": run_state.state.last_supersession.model_dump(mode="json")
+            if run_state.state.last_supersession
+            else None,
             "uncertainty": run_state.state.uncertainty.model_dump(mode="json"),
+            "smallest_discriminative_unit": run_state.state.smallest_discriminative_unit,
             "propagation_trace": summarize_impacts(impacts),
             "summary": summary.model_dump(mode="json"),
             "sweep_id": recorded_sweep["id"],
@@ -759,6 +920,7 @@ class PsiService:
                 changed_text = f"{changed_text}\n{event.description}".strip()
                 run_state.state.O = event
         payload = build_analysis_payload(changed_text or (run_state.state.O.description if run_state.state.O else run_state.metadata.title))
+        run_state.state.applicability = assess_applicability(payload)
         constraints = self.repository.list_constraints(run_state.metadata.project_id) if run_state.metadata.project_id else []
         self._apply_runtime_control_surface(
             run_state=run_state,
@@ -815,6 +977,12 @@ class PsiService:
         run_state.state.transition = self._apply_compliance_pressure(transition, compliance)
         run_state.state.compliance = compliance
         run_state.metadata.status = self._status_from_transition(run_state.state.transition.decision)
+        self._refresh_control_state(
+            run_state,
+            artifacts=self.repository.list_artifacts(run_id),
+            phase_reason="coherence sweep completed",
+            trigger=trigger_event_id or "sweep_run",
+        )
         local_articulation_summary = summarize_local_articulation(payload)
         strongest_tension = self._strongest_live_tension(run_state)
         best_discriminator = run_state.state.current_discriminator or "re-run discriminator search"
@@ -843,6 +1011,9 @@ class PsiService:
             "deferred_entities": deferred,
             "transition": run_state.state.transition.model_dump(mode="json"),
             "compliance_report": compliance.model_dump(mode="json"),
+            "current_phase": run_state.state.current_phase.value,
+            "next_gating_condition": run_state.state.next_gating_condition,
+            "smallest_discriminative_unit": run_state.state.smallest_discriminative_unit,
         }
 
     def register_anchor(
@@ -858,6 +1029,10 @@ class PsiService:
         rationale: str = "",
         dependencies: list[str] | None = None,
         implications: list[str] | None = None,
+        weakening_conditions: list[str] | None = None,
+        explanatory_burden: list[str] | None = None,
+        scaffold_boundary: dict[str, object] | None = None,
+        user_promoted: bool = False,
     ) -> dict[str, object]:
         anchor = Anchor(
             name=name,
@@ -869,6 +1044,10 @@ class PsiService:
             rationale=rationale,
             dependencies=dependencies or [],
             implications=implications or [],
+            weakening_conditions=weakening_conditions or [],
+            explanatory_burden=explanatory_burden or [],
+            scaffold_boundary=ScaffoldBoundary.model_validate(scaffold_boundary) if scaffold_boundary else None,
+            user_promoted=user_promoted,
         )
         stored = self.repository.upsert_anchor(project_id, run_id, anchor)
         if run_id:
@@ -907,6 +1086,9 @@ class PsiService:
         risks: list[str] | None = None,
         discriminators: list[str] | None = None,
         forces: list[str] | None = None,
+        weakening_conditions: list[str] | None = None,
+        explanatory_burden: list[str] | None = None,
+        discriminator_path: list[str] | None = None,
     ) -> dict[str, object]:
         if item_type == "hypothesis":
             status = {"retire": "SUPERSEDED", "modify": "OPEN", "add": "OPEN"}.get(action, "OPEN")
@@ -922,6 +1104,9 @@ class PsiService:
                     preserves=preserves or [],
                     risks=risks or [],
                     discriminators=discriminators or [],
+                    weakening_conditions=weakening_conditions or [],
+                    explanatory_burden=explanatory_burden or [],
+                    discriminator_path=discriminator_path or [],
                 ),
             )
         elif item_type == "tension":
@@ -953,6 +1138,7 @@ class PsiService:
         target: list[str] | None = None,
         best_next_probe: str = "",
         confidence_gain: float = 0.5,
+        expected_outcome_map: dict[str, str] | None = None,
     ) -> dict[str, object]:
         stored = self.repository.upsert_discriminator(
             project_id,
@@ -963,6 +1149,7 @@ class PsiService:
                 target=target or [],
                 best_next_probe=best_next_probe,
                 confidence_gain=confidence_gain,
+                expected_outcome_map=expected_outcome_map or {},
             ),
         )
         if run_id:
@@ -988,12 +1175,13 @@ class PsiService:
             )
         else:
             transition = TransitionState(
-                decision=TransitionDecision(decision),
+                decision=self._parse_transition_decision(decision),
                 rationale=rationale or "Transition set explicitly.",
                 recommended_regimes=run_state.state.active_regimes,
             )
         run_state.state.transition = transition
         run_state.metadata.status = self._status_from_transition(transition.decision)
+        self._refresh_control_state(run_state, phase_reason="transition set", trigger="set_transition")
         summary = self.repository.get_run_summary(run_id)
         self._evaluate_and_store_compliance(run_state, summary, action="reflect")
         return transition.model_dump(mode="json")
@@ -1039,6 +1227,7 @@ class PsiService:
     def check_compliance(self, run_id: str, action: str = "summary") -> dict[str, object]:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
         summary = self.repository.get_run_summary(run_id)
+        self._refresh_control_state(run_state, phase_reason="compliance check", trigger=action)
         report = self._evaluate_and_store_compliance(
             run_state=run_state,
             summary=summary,
@@ -1051,6 +1240,7 @@ class PsiService:
         summary = self.repository.get_run_summary(run_id)
         self._ensure_authoritative_structures(run_state, summary)
         audit_summary = self._audit_sources(run_state)
+        self._refresh_control_state(run_state, phase_reason="source audit", trigger="source_audit")
         self.repository.save_run(run_state, summary)
         return {
             "run_id": run_id,
@@ -1062,6 +1252,7 @@ class PsiService:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
         summary = self.repository.get_run_summary(run_id)
         self._ensure_authoritative_structures(run_state, summary)
+        self._refresh_control_state(run_state, phase_reason="structure extract", trigger="structure_extract")
         self.repository.save_run(run_state, summary)
         return {
             "run_id": run_id,
@@ -1075,6 +1266,7 @@ class PsiService:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
         summary = self.repository.get_run_summary(run_id)
         self._ensure_authoritative_structures(run_state, summary)
+        self._refresh_control_state(run_state, phase_reason="trace run", trigger="trace_run")
         self.repository.save_run(run_state, summary)
         blocking = [trace for trace in run_state.state.traces if trace.blocking or trace.divergence_class]
         return {
@@ -1088,6 +1280,7 @@ class PsiService:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
         summary = self.repository.get_run_summary(run_id)
         self._ensure_authoritative_structures(run_state, summary)
+        self._refresh_control_state(run_state, phase_reason="gap analyze", trigger="gap_analyze")
         self.repository.save_run(run_state, summary)
         blocking = [gap for gap in run_state.state.gaps if gap.blocking or gap.status == "OPEN"]
         return {
@@ -1101,6 +1294,7 @@ class PsiService:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
         summary = self.repository.get_run_summary(run_id)
         self._ensure_authoritative_structures(run_state, summary)
+        self._refresh_control_state(run_state, phase_reason="search plan", trigger="search_plan")
         self.repository.save_run(run_state, summary)
         return {
             "run_id": run_id,
@@ -1112,6 +1306,7 @@ class PsiService:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
         summary = self.repository.get_run_summary(run_id)
         self._ensure_authoritative_structures(run_state, summary)
+        self._refresh_control_state(run_state, phase_reason="basin generate", trigger="basin_generate")
         self.repository.save_run(run_state, summary)
         return {
             "run_id": run_id,
@@ -1125,6 +1320,7 @@ class PsiService:
         skeptic_findings, antipattern_findings = generate_stress_findings(run_state)
         run_state.state.skeptic_findings = skeptic_findings
         run_state.state.antipattern_findings = antipattern_findings
+        self._refresh_control_state(run_state, phase_reason="stress run", trigger="stress_run")
         report = self._evaluate_and_store_compliance(run_state=run_state, summary=summary, action=action)
         return {
             "run_id": run_id,
@@ -1161,15 +1357,29 @@ class PsiService:
         final_artifacts = self.repository.list_artifacts(run_id)
         context["artifacts"] = final_artifacts
         run_state.artifacts = pointers
+        self._audit_sources(run_state)
         run_state.state.compliance = evaluate_compliance(
             run_state=run_state,
             artifacts=final_artifacts,
             action="artifact_promotion",
         )
+        self._refresh_control_state(
+            run_state,
+            artifacts=final_artifacts,
+            phase_reason="artifact sync",
+            trigger="sync_artifacts",
+        )
+        context["run_state"] = run_state
         final_artifacts, pointers = generate_artifacts(context)
         for artifact in final_artifacts:
             self.repository.save_artifact(run_id, artifact)
         run_state.artifacts = pointers
+        self._refresh_control_state(
+            run_state,
+            artifacts=final_artifacts,
+            phase_reason="artifact sync",
+            trigger="sync_artifacts",
+        )
         summary = context["summary"]
         self.repository.save_run(run_state, summary)
         return {
@@ -1197,6 +1407,7 @@ class PsiService:
         run_state = self._hydrate_run_state(context["run_state"])
         self._ensure_authoritative_structures(run_state, context["summary"])
         self._audit_sources(run_state)
+        self._refresh_control_state(run_state, artifacts=context["artifacts"], phase_reason="export", trigger="export_run")
         context["run_state"] = run_state
         context["source_objects"] = run_state.state.sources
         context["components"] = run_state.state.components
@@ -1316,6 +1527,7 @@ class PsiService:
                 ),
                 metadata={"imported": True},
             )
+        self._refresh_control_state(run_state, phase_reason="import", trigger="import_run")
         self.repository.save_run(run_state, summary)
         for event_payload in payload.get("events", []):
             self.repository.record_visibility_event(
@@ -1547,6 +1759,7 @@ class PsiService:
     def generate_summary(self, run_id: str) -> dict[str, object]:
         summary = self.repository.get_run_summary(run_id)
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+        self._refresh_control_state(run_state, phase_reason="summary", trigger="generate_summary")
         compliance = self._evaluate_and_store_compliance(run_state, summary, action="summary")
         return {
             "run_id": run_id,

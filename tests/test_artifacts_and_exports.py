@@ -22,6 +22,8 @@ def test_artifact_sync_generates_full_bundle(service, repository):
     assert "field_state_register" in artifact_types
     stored = repository.list_artifacts(result["run_id"])
     assert len(stored) == 21
+    state = service.get_run_state(result["run_id"])
+    assert state["compact"]["open_artifacts"] == []
     source_register = next(item for item in stored if item.artifact_type.value == "source_register")
     component_ledger = next(item for item in stored if item.artifact_type.value == "component_ledger")
     trace_ledger = next(item for item in stored if item.artifact_type.value == "trace_ledger")
@@ -70,7 +72,9 @@ def test_export_import_round_trip(service, settings):
     assert bundle["basins"]
     assert bundle["skeptic_findings"] is not None
     assert bundle["antipattern_findings"] is not None
-    assert bundle["machine_readable_run_state"]["psi_run"]["metadata"]["schema_version"] == "1.1.0"
+    assert bundle["machine_readable_run_state"]["psi_run"]["metadata"]["schema_version"] == "1.2.0"
+    assert bundle["machine_readable_run_state"]["psi_run"]["metadata"]["run_class"] in {"exploratory", "working", "canonical"}
+    assert bundle["machine_readable_run_state"]["psi_run"]["state"]["current_phase"]
 
     import_settings = ServerSettings(
         data_dir=settings.data_dir.parent / "imported",

@@ -23,6 +23,12 @@
 - Import from `bundle.json` or `bundle.yaml`
 - Confirm the imported database path is writable
 
+## `uv` commands fail on Windows with a hardlink or OneDrive error
+
+- Set `$env:UV_LINK_MODE = "copy"` before running `uv sync`, `uv run`, or `uv build`
+- Avoid building from a synced workspace if you need default hardlink mode
+- Re-run the build after clearing any failed `dist/` output if needed
+
 ## Durability gate blocks a move unexpectedly
 
 - Inspect `durability_assessment` in the tool output

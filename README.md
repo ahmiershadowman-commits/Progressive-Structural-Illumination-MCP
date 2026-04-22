@@ -2,6 +2,8 @@
 
 PSI Coprocessor MCP is a local-first Model Context Protocol server that operationalizes Progressive Structural Illumination as a persistent cognitive coprocessor for code, architecture, debugging, and research work.
 
+Canonical implementation authority is defined by the source pair documented in `docs/canonical-source-corpus.md`, not by derivative notes or repo-local summaries.
+
 It ships as a typed Python package with:
 
 - FastMCP tools, resources, and prompts
@@ -22,6 +24,13 @@ uv run psi-coprocessor-mcp diagnose
 uv run psi-coprocessor-mcp stdio
 ```
 
+If you run `uv` commands from a Windows synced folder such as OneDrive and hit a hardlink error, use:
+
+```powershell
+$env:UV_LINK_MODE = "copy"
+uv sync --extra dev
+```
+
 For streamable HTTP:
 
 ```powershell
@@ -36,6 +45,7 @@ Recommended host routing instruction:
 
 - [Installation](docs/installation.md)
 - [Architecture](docs/architecture.md)
+- [Canonical Source Corpus](docs/canonical-source-corpus.md)
 - [Build Contract Coverage Audit](docs/build-contract-coverage-audit.md)
 - [Tool / Resource / Prompt Reference](docs/tool-resource-prompt-reference.md)
 - [Schema Reference](docs/schema-reference.md)
@@ -49,5 +59,4 @@ Recommended host routing instruction:
 uv run pytest
 ```
 
-Current test status: `22 passed`
-Experimental reasoning and state prosthesis
+Current test status: `24 passed`

@@ -1,10 +1,8 @@
 # Known Limitations
 
-1. The PSI analysis is deterministic and heuristic.
-It preserves structure and pressure explicitly, but it does not replace the host model’s semantic reasoning.
+1. The PSI analysis is deterministic and heuristic. It preserves structure and pressure explicitly, but it does not replace the host model's semantic reasoning.
 
-2. Sweep weighting is currently configured in code.
-There is no user-facing weight profile editor yet.
+2. Sweep weighting is currently configured in code. There is no user-facing weight profile editor yet.
 
 3. Export/import restores runs, entities, artifacts, sweeps, and committed memory, but it does not replay prior export history rows.
 

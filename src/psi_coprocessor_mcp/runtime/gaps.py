@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..models import (
     BasinRecord,
     BasinType,
+    DivergenceClass,
     FrictionSignal,
     FrictionType,
     GapOrigin,
@@ -34,6 +35,16 @@ def _gap_from_trace(trace: TraceStep) -> tuple[GapType, GapOrigin]:
     return mapping.get(trace.divergence_class.value if trace.divergence_class else "resolved", (GapType.IMPLEMENTATION, GapOrigin.TRUE_STRUCTURAL_ABSENCE))
 
 
+def _smallest_discriminative_unit(trace: TraceStep) -> str:
+    if trace.operator_ref:
+        return f"operator::{trace.operator_ref}"
+    if trace.divergence_class == DivergenceClass.MISSING_INTERLOCK:
+        return f"interlock::{trace.from_state}->{trace.to_state}"
+    if trace.divergence_class == DivergenceClass.SCOPE_LIMITATION:
+        return f"regime::{trace.branch_key or 'primary'}"
+    return trace.trigger[:160] or trace.outcome[:160]
+
+
 def derive_gap_records(
     payload: AnalysisPayload,
     traces: list[TraceStep],
@@ -54,6 +65,7 @@ def derive_gap_records(
                 nearly_covers=[trace.operator_ref] if trace.operator_ref else [],
                 insufficient_because="Forward tracing terminated with an unresolved divergence.",
                 dissolved_by=[f"resolve::{trace.divergence_class.value}"],
+                smallest_discriminative_unit=_smallest_discriminative_unit(trace),
                 discriminator=trace.trigger[:200],
                 blocking=trace.blocking,
                 metadata={"derived": True, "trace_id": trace.id},
@@ -75,6 +87,7 @@ def derive_gap_records(
                 description=friction.rationale,
                 likely_origin=origin,
                 insufficient_because="Typed friction indicates a surviving unresolved object.",
+                smallest_discriminative_unit=friction.criteria[0] if friction.criteria else friction.rationale[:160],
                 discriminator=friction.rationale[:200],
                 blocking=friction.severity >= 0.7,
                 metadata={"derived": True},
@@ -91,9 +104,10 @@ def derive_search_records(gaps: list[GapRecord]) -> list[SearchRecord]:
         searches.append(
             SearchRecord(
                 id=f"search::{gap.id}",
-                query=gap.discriminator or gap.title,
+                query=gap.discriminator or gap.smallest_discriminative_unit or gap.title,
                 target_object=gap.title,
-                rationale=f"Search the smallest unresolved object exposed by {gap.title}.",
+                smallest_discriminative_unit=gap.smallest_discriminative_unit or gap.title,
+                rationale=f"Search the smallest discriminative unresolved unit exposed by {gap.title}.",
                 status=SearchStatus.PLANNED,
                 findings=[],
                 metadata={"derived_from_gap": gap.id},
@@ -119,6 +133,9 @@ def derive_basin_records(
                 status=hypothesis.status,
                 preserves=hypothesis.preserves,
                 conflicts=hypothesis.risks,
+                explanatory_burden=hypothesis.explanatory_burden,
+                weakening_conditions=hypothesis.weakening_conditions,
+                discriminator_path=hypothesis.discriminator_path,
                 discriminator=", ".join(hypothesis.discriminators[:2]),
                 metadata={"derived_from": "hypothesis"},
             )
@@ -133,6 +150,9 @@ def derive_basin_records(
                 status="OPEN",
                 preserves=[tension.title for tension in tensions[:3]],
                 conflicts=[tension.description for tension in tensions[:2]],
+                explanatory_burden=["Keeps unresolved forces explicit until a discriminator kills a branch."],
+                weakening_conditions=["Tensions resolve cleanly under a single basin without residue."],
+                discriminator_path=[tensions[0].title],
                 discriminator=tensions[0].title,
                 metadata={"derived": True},
             )
@@ -147,6 +167,9 @@ def derive_basin_records(
                 status="OPEN",
                 preserves=["durability pressure"],
                 conflicts=["stable continuation"],
+                explanatory_burden=["Explains why continuity poison may be the real source of apparent progress."],
+                weakening_conditions=["Placeholder continuity is removed and the sweep no longer reopens the field."],
+                discriminator_path=["replace_poisoned_continuity", "rerun_sweep"],
                 discriminator="replace the poisoned continuity and re-run the sweep",
                 metadata={"derived": True},
             )
@@ -161,6 +184,9 @@ def derive_basin_records(
                 status="OPEN",
                 preserves=[],
                 conflicts=[],
+                explanatory_burden=["Marks that alternate basins are still under-articulated."],
+                weakening_conditions=["A stronger literal or reinterpretive basin becomes explicit."],
+                discriminator_path=["gather_first_discriminator"],
                 discriminator="gather a first discriminator before stabilizing",
                 metadata={"derived": True},
             )

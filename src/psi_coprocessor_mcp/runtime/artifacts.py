@@ -29,7 +29,8 @@ def _tension_lines(run_state: PsiRunState) -> list[str]:
 
 def _hypothesis_lines(run_state: PsiRunState) -> list[str]:
     return [
-        f"{hypothesis.title} [{hypothesis.status}] confidence={hypothesis.confidence.value}"
+        f"{hypothesis.title} [{hypothesis.status}] confidence={hypothesis.confidence.value} "
+        f"burden={'; '.join(hypothesis.explanatory_burden[:2]) or 'unspecified'}"
         for hypothesis in run_state.state.H
     ]
 
@@ -48,7 +49,10 @@ def _probe_lines(run_state: PsiRunState) -> list[str]:
 def _claim_lines(run_state: PsiRunState) -> list[str]:
     return [
         f"{claim.provenance.value}:{claim.structural_role or 'claim'} durability={claim.durability_class.value} "
-        f"load_bearing={'yes' if claim.load_bearing else 'no'} :: {claim.statement}"
+        f"load_bearing={'yes' if claim.load_bearing else 'no'} "
+        f"axes={claim.confidence_axes.evidence_confidence.value}/{claim.confidence_axes.causal_confidence.value}/"
+        f"{claim.confidence_axes.scope_confidence.value}/{claim.confidence_axes.representation_confidence.value} "
+        f":: {claim.statement}"
         for claim in run_state.state.C
     ]
 
@@ -92,21 +96,26 @@ def _trace_lines(run_state: PsiRunState) -> list[str]:
 
 def _gap_lines(run_state: PsiRunState) -> list[str]:
     return [
-        f"{gap.title} [{gap.gap_type.value}] origin={gap.likely_origin.value} blocking={'yes' if gap.blocking else 'no'}"
+        f"{gap.title} [{gap.gap_type.value}] origin={gap.likely_origin.value} "
+        f"smallest_unit={gap.smallest_discriminative_unit or 'unspecified'} "
+        f"blocking={'yes' if gap.blocking else 'no'}"
         for gap in run_state.state.gaps
     ]
 
 
 def _search_lines(run_state: PsiRunState) -> list[str]:
     return [
-        f"{search.status.value}: {search.query} -> {search.target_object or 'smallest unresolved object'}"
+        f"{search.status.value}: {search.query} -> "
+        f"{search.smallest_discriminative_unit or search.target_object or 'smallest discriminative unresolved unit'}"
         for search in run_state.state.searches
     ]
 
 
 def _basin_lines(run_state: PsiRunState) -> list[str]:
     return [
-        f"{basin.title} [{basin.basin_type.value}] status={basin.status}"
+        f"{basin.title} [{basin.basin_type.value}] status={basin.status} "
+        f"burden={'; '.join(basin.explanatory_burden[:2]) or 'unspecified'} "
+        f"path={'; '.join(basin.discriminator_path[:2]) or 'unspecified'}"
         for basin in run_state.state.basins
     ]
 
@@ -153,6 +162,9 @@ def _artifact_content(artifact_type: ArtifactType, context: dict[str, object]) -
     if artifact_type == ArtifactType.SCOPE_LOCK:
         return (
             "# scope-lock\n\n"
+            f"## Applicability\n- applicable={'yes' if run_state.state.applicability.applicable else 'no'}\n"
+            f"- rationale={run_state.state.applicability.rationale or 'n/a'}\n"
+            f"- run_class={run_state.metadata.run_class.value}\n\n"
             f"## Included\n{_bullet(run_state.state.B.included)}\n\n"
             f"## Excluded\n{_bullet(run_state.state.B.excluded)}\n\n"
             f"## Success Criteria\n{_bullet(run_state.state.B.success_criteria)}\n"
@@ -171,7 +183,7 @@ def _artifact_content(artifact_type: ArtifactType, context: dict[str, object]) -
         return f"# operator-ledger\n\n{_bullet(lines)}\n", bool(run_state.state.primitive_operators)
     if artifact_type == ArtifactType.CONSTRAINT_LEDGER:
         lines = [constraint.description for constraint in constraints] + run_state.state.S.implementation
-        return f"# constraint-ledger\n\n{_bullet(lines)}\n", bool(lines)
+        return f"# constraint-ledger\n\n{_bullet(lines)}\n", True
     if artifact_type == ArtifactType.DEPENDENCY_AND_INTERLOCK_MAP:
         lines = _interlock_lines(run_state) or (run_state.state.W.dependencies_changed + [impact.entity_name for impact in run_state.state.current_blast_radius])
         return f"# dependency-and-interlock-map\n\n{_bullet(lines)}\n", bool(run_state.state.interlocks)
@@ -183,7 +195,7 @@ def _artifact_content(artifact_type: ArtifactType, context: dict[str, object]) -
         return f"# gap-and-pressure-ledger\n\n{_bullet(lines)}\n", bool(run_state.state.gaps)
     if artifact_type == ArtifactType.SEARCH_LOG:
         lines = _search_lines(run_state) or ([event.title for event in events if event.type.value in {"question", "reframe"}] + _probe_lines(run_state))
-        return f"# search-log\n\n{_bullet(lines)}\n", bool(run_state.state.searches)
+        return f"# search-log\n\n{_bullet(lines)}\n", True
     if artifact_type == ArtifactType.HYPOTHESIS_BASIN_LEDGER:
         return (
             f"# hypothesis-basin-ledger\n\n{_bullet(_basin_lines(run_state) + _hypothesis_lines(run_state) + _tension_lines(run_state))}\n",
@@ -192,7 +204,11 @@ def _artifact_content(artifact_type: ArtifactType, context: dict[str, object]) -
     if artifact_type == ArtifactType.CONSTRUCTION_SPEC:
         lines = [
             f"transition={run_state.state.transition.decision.value}",
+            f"current_phase={run_state.state.current_phase.value}",
+            f"run_class={run_state.metadata.run_class.value}",
             f"active_regimes={', '.join(regime.value for regime in run_state.state.active_regimes)}",
+            f"next_gating_condition={run_state.state.next_gating_condition}",
+            f"smallest_discriminative_unit={run_state.state.smallest_discriminative_unit or 'unspecified'}",
             f"compliance={run_state.state.compliance.status if run_state.state.compliance else 'UNKNOWN'}",
             summary.expert_summary,
         ]
@@ -203,14 +219,21 @@ def _artifact_content(artifact_type: ArtifactType, context: dict[str, object]) -
             if run_state.state.compliance
             else []
         )
-        lines = _friction_lines(run_state) + _routing_lines(run_state) + run_state.state.N.notes + compliance_lines + _stress_lines(run_state)
+        lines = (
+            _friction_lines(run_state)
+            + _routing_lines(run_state)
+            + run_state.state.N.notes
+            + [f"partial_propagation::{item}" for item in run_state.state.uncertainty.partial_propagation_warnings]
+            + compliance_lines
+            + _stress_lines(run_state)
+        )
         return f"# stress-test-report\n\n{_bullet(lines)}\n", bool(run_state.state.skeptic_findings or run_state.state.antipattern_findings or compliance_lines)
     if artifact_type == ArtifactType.SUPERSESSION_LEDGER:
         lines = [
             f"{item['entity_type']}:{item['entity_id']} -> {item['superseded_by']} :: {item['reason']}"
             for item in supersessions
         ]
-        return f"# supersession-ledger\n\n{_bullet(lines)}\n", bool(supersessions)
+        return f"# supersession-ledger\n\n{_bullet(lines)}\n", True
     if artifact_type == ArtifactType.FINAL_SYNTHESIS:
         return (
             "# final-synthesis\n\n"
@@ -231,7 +254,7 @@ def _artifact_content(artifact_type: ArtifactType, context: dict[str, object]) -
         ] + _routing_lines(run_state)
         return f"# coherence-sweep-log\n\n{_bullet(lines)}\n", bool(sweeps)
     if artifact_type == ArtifactType.ANCHOR_REGISTER:
-        return f"# anchor-register\n\n{_bullet(_anchor_lines(run_state))}\n", bool(run_state.state.A)
+        return f"# anchor-register\n\n{_bullet(_anchor_lines(run_state))}\n", True
     if artifact_type == ArtifactType.FRICTION_TYPE_LOG:
         return f"# friction-type-log\n\n{_bullet(_friction_lines(run_state))}\n", bool(run_state.state.F)
     raise ValueError(f"Unsupported artifact type: {artifact_type.value}")

@@ -18,6 +18,7 @@ MIGRATIONS = [
     "0003_indexes.sql",
     "0004_rubric_integration.sql",
     "0005_methodology_ontology.sql",
+    "0006_control_surface.sql",
 ]
 
 

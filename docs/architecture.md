@@ -31,33 +31,38 @@ Runtime logic lives in:
 Core behaviors:
 
 - visibility-event detection
+- applicability boundary assessment
 - source intake normalization and canonicalization
 - friction typing
 - lens and scope stabilization
 - primitive extraction
 - dependency consolidation via interlock graph
 - local articulation tracing and forward tracing
-- gap-origin and search-plan derivation
+- gap-origin and search-plan derivation against the smallest discriminative unresolved unit
 - basin generation and skeptic / anti-pattern stress
 - weighted whole-field coherence sweeps
 - blast-radius prioritization
 - provenance-typed claims and durability classes
+- confidence axes separated from durability
+- bounded scaffold semantics for temporary structure
 - mode-weighted control family activation
 - friction routing with default-placement metadata
 - pre-emission compliance checking
 - durability/native-minimality gating
 - transition recommendation and setting
 - deterministic artifact sync
+- current-phase, phase-history, open-artifact, next-gate, and supersession tracking
 
 ## Layer 3: Persistence
 
-Persistence uses SQLite with four migrations:
+Persistence uses SQLite with six migrations:
 
 - `0001_core.sql`
 - `0002_retrieval_fts.sql`
 - `0003_indexes.sql`
 - `0004_rubric_integration.sql`
 - `0005_methodology_ontology.sql`
+- `0006_control_surface.sql`
 
 State is stored across:
 
@@ -127,7 +132,7 @@ It now scores both project-level and run-level structural objects using:
 
 ### Run-state vector
 
-`PsiRunState` keeps `W/L/B/O/C/A/U/H/D/F/N/P/T/S/G` explicit in code and persistence, plus operator families, control families, friction routing, and compliance state.
+`PsiRunState` keeps `W/L/B/O/C/A/U/H/D/F/N/P/T/S/G` explicit in code and persistence, plus applicability, current phase, phase history, open artifacts, next gating condition, smallest discriminative unit, operator families, control families, friction routing, and compliance state.
 
 ### Durability gate
 
@@ -149,7 +154,7 @@ Blocking mode can raise a tool error when the caller requests hard blocking.
 - friction-to-regime routing metadata
 - explicit separation of provenance, confidence, and durability
 
-`runtime/compliance.py` then checks whether a would-be stable surface still violates PSI obligations.
+`runtime/compliance.py` then checks whether a would-be stable surface still violates PSI obligations, including Phase 0 applicability, bounded temporary scaffolds, basin burden, and uncertainty-honesty state.
 
 ## Design Departures
 

@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.11+
 - `uv`
 - no cloud services
 - no remote accounts
@@ -13,6 +13,14 @@
 uv sync --extra dev
 uv run psi-coprocessor-mcp diagnose
 ```
+
+If you run `uv` commands from a Windows synced folder such as OneDrive, set:
+
+```powershell
+$env:UV_LINK_MODE = "copy"
+```
+
+before `uv sync`, `uv run`, or `uv build` to avoid hardlink failures in the uv cache.
 
 The server stores local state in:
 
@@ -30,6 +38,8 @@ Optional environment variables:
 - `PSI_MCP_HTTP_PATH`
 - `PSI_MCP_LOG_LEVEL`
 - `PSI_MCP_SEED_USER_LANE`
+
+`PSI_MCP_DATA_DIR`, `PSI_MCP_DB_PATH`, and `PSI_MCP_EXPORT_DIR` support `%VAR%` and `~` expansion on the server side.
 
 ## Running
 

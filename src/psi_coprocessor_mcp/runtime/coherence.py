@@ -500,7 +500,7 @@ def recommend_transition(
 ) -> TransitionState:
     if durability_blocked:
         return TransitionState(
-            decision=TransitionDecision.ROLLBACK,
+            decision=TransitionDecision.ROLLBACK_REQUIRED,
             rationale="Durability/native-minimality gate blocked forward movement due to known-bad continuity.",
             blocking_reasons=["durability gate blocked"],
             recommended_regimes=[Regime.SYNTHESIS_CONSTRUCTION, Regime.STRESS_TEST, Regime.REPAIR],
@@ -513,7 +513,7 @@ def recommend_transition(
         for impact in impacts
     ):
         return TransitionState(
-            decision=TransitionDecision.ROLLBACK,
+            decision=TransitionDecision.ROLLBACK_REQUIRED,
             rationale="A high-centrality and high-fragility upstream object destabilized under the sweep.",
             blocking_reasons=["fragile central upstream object destabilized"],
             recommended_regimes=[Regime.DEPENDENCY_MAPPING, Regime.REPAIR, Regime.WHOLE_FIELD_COHERENCE_SWEEP],

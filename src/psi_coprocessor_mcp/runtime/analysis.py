@@ -7,7 +7,9 @@ from collections import Counter
 from dataclasses import dataclass
 
 from ..models import (
+    ApplicabilityAssessment,
     ConfidenceLevel,
+    ConfidenceAxes,
     DurabilityClass,
     DurabilityAssessment,
     DurabilityMode,
@@ -17,6 +19,7 @@ from ..models import (
     Probe,
     Regime,
     ScopeBoundaries,
+    ScaffoldBoundary,
     SourceKind,
     SourceObject,
     SubstrateConstraints,
@@ -126,6 +129,58 @@ def build_analysis_payload(
         diff=diff,
         attached_context=attached_context,
         test_failure=test_failure,
+    )
+
+
+def assess_applicability(payload: AnalysisPayload) -> ApplicabilityAssessment:
+    text = payload.source_text.lower()
+    structural_markers = ARCHITECTURE_KEYWORDS | DEBUG_KEYWORDS | PATCH_KEYWORDS | RESEARCH_KEYWORDS | {
+        "ambiguity",
+        "boundary",
+        "change",
+        "dependency",
+        "constraint",
+        "scope",
+        "coherence",
+        "friction",
+        "transition",
+        "export",
+        "import",
+        "artifact",
+        "artifacts",
+        "memory",
+        "primitive",
+        "operator",
+    }
+    mismatch_markers = {
+        "casual chat",
+        "translate",
+        "rewrite this sentence",
+        "poem",
+        "small talk",
+        "trivia",
+    }
+    matched = sorted(token for token in structural_markers if token in text)
+    mismatched = sorted(token for token in mismatch_markers if token in text)
+    applicable = bool(matched) and not mismatched
+    rationale = (
+        "Task carries structural, dependency, ambiguity, debugging, or architecture pressure that benefits from PSI."
+        if applicable
+        else "Task does not clearly require PSI-grade structural decomposition without rescoping."
+    )
+    return ApplicabilityAssessment(
+        applicable=applicable,
+        rationale=rationale,
+        boundaries=[
+            "Use PSI when the task has hidden dependencies, unresolved ambiguity, structural mismatch, contradiction, or durability risk.",
+            "Rescope when the task is only stylistic, rhetorical, or does not need whole-field propagation.",
+        ],
+        failure_modes=(
+            ["method_fit_unclear"] + [f"mismatch::{item}" for item in mismatched]
+            if not applicable
+            else []
+        ),
+        notes=[f"matched::{item}" for item in matched[:8]],
     )
 
 
@@ -342,6 +397,33 @@ def _claim_confidence(statement: str, provenance: ProvenanceTag) -> ConfidenceLe
     return ConfidenceLevel.PROVISIONAL
 
 
+def _confidence_axes(
+    statement: str,
+    provenance: ProvenanceTag,
+    load_bearing: bool,
+    structural_role: str,
+) -> ConfidenceAxes:
+    evidence = _claim_confidence(statement, provenance)
+    lowered = statement.lower()
+    causal = evidence
+    if structural_role in {"proposal", "transition"} or any(token in lowered for token in SPECULATIVE_CUES):
+        causal = ConfidenceLevel.PROVISIONAL
+    if any(token in lowered for token in {"cause", "because", "drives", "forces", "enables"}):
+        causal = evidence if evidence in {ConfidenceLevel.STRONG, ConfidenceLevel.MODERATE} else ConfidenceLevel.PROVISIONAL
+    scope = ConfidenceLevel.PROVISIONAL if any(token in lowered for token in {"scope", "boundary", "unless", "only when"}) else evidence
+    representation = ConfidenceLevel.PROVISIONAL
+    if structural_role in {"constraint", "observation"} and provenance in {ProvenanceTag.OBSERVED, ProvenanceTag.GROUNDED, ProvenanceTag.SOURCE}:
+        representation = ConfidenceLevel.MODERATE
+    if load_bearing and provenance == ProvenanceTag.UNKNOWN:
+        representation = ConfidenceLevel.UNRESOLVED
+    return ConfidenceAxes(
+        evidence_confidence=evidence,
+        causal_confidence=causal,
+        scope_confidence=scope,
+        representation_confidence=representation,
+    )
+
+
 def _claim_durability(statement: str) -> DurabilityClass:
     lowered = statement.lower()
     if any(re.search(pattern, statement, flags=re.IGNORECASE) for pattern in PLACEHOLDER_PATTERNS):
@@ -355,6 +437,27 @@ def _claim_durability(statement: str) -> DurabilityClass:
     if any(token in lowered for token in UNKNOWN_CUES):
         return DurabilityClass.UNKNOWN
     return DurabilityClass.PROVISIONAL
+
+
+def _claim_scaffold_boundary(statement: str, durability: DurabilityClass) -> ScaffoldBoundary | None:
+    lowered = statement.lower()
+    temporary = any(token in lowered for token in {"temporary", "interim", "for now", "sandbox", "bounded", "prototype"})
+    if durability not in {DurabilityClass.SANDBOXED, DurabilityClass.CONDITIONAL} and not temporary:
+        return None
+    bounded = any(token in lowered for token in {"bounded", "until", "before", "only for"})
+    exit_condition = ""
+    if "until" in lowered:
+        exit_condition = statement[lowered.index("until") :][:160]
+    elif "before" in lowered:
+        exit_condition = statement[lowered.index("before") :][:160]
+    return ScaffoldBoundary(
+        label="temporary-scaffold",
+        bounded=bounded,
+        boundary="Explicitly temporary structure must not substitute for durable dependency structure.",
+        exit_condition=exit_condition,
+        substitute_for_real_structure=not bounded,
+        notes=["Derived from typed claim durability semantics."],
+    )
 
 
 def infer_typed_claims(payload: AnalysisPayload) -> list[TypedClaim]:
@@ -378,15 +481,19 @@ def infer_typed_claims(payload: AnalysisPayload) -> list[TypedClaim]:
         lowered = statement.lower()
         load_bearing = any(keyword in lowered for keyword in LOAD_BEARING_KEYWORDS) or source in {"diff", "test_failure"}
         provenance = _claim_provenance(statement, source)
+        structural_role = _claim_role(statement)
+        durability = _claim_durability(statement)
         claims.append(
             TypedClaim(
                 id=f"claim_{idx}",
                 statement=statement,
                 provenance=provenance,
                 load_bearing=load_bearing,
-                structural_role=_claim_role(statement),
+                structural_role=structural_role,
                 confidence=_claim_confidence(statement, provenance),
-                durability_class=_claim_durability(statement),
+                durability_class=durability,
+                confidence_axes=_confidence_axes(statement, provenance, load_bearing, structural_role),
+                scaffold_boundary=_claim_scaffold_boundary(statement, durability),
                 evidence=[statement] if source in {"diff", "test_failure", "attached_context"} else [],
                 notes=["derived heuristically from source text"],
                 source=source,

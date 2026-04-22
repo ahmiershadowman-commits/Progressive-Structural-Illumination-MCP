@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 
+from psi_coprocessor_mcp.config import ServerSettings
 from psi_coprocessor_mcp.models import MemoryLane
 
 
 def test_migrations_apply_and_seed_memory(database: sqlite3.Connection, repository):
     migration_count = database.connection.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"]
-    assert migration_count == 5
+    assert migration_count == 6
     method = repository.get_method_memory("current")
     assert "visibility events" in method.content
     normalization = repository.get_method_memory("normalization-map")
@@ -52,6 +53,7 @@ def test_typed_claims_and_compliance_are_persisted(repository, service):
     claims = repository.list_typed_claims(result["run_id"])
     assert claims
     assert any(claim.load_bearing for claim in claims)
+    assert all(claim.confidence_axes.evidence_confidence.value for claim in claims)
     compliance = repository.get_compliance_report(result["run_id"])
     assert compliance is not None
     assert compliance.status in {"PASS", "WARN", "BLOCKED"}
@@ -67,3 +69,17 @@ def test_source_objects_are_persisted(repository, service):
     assert source_objects
     assert any(source.source_kind.value == "task" for source in source_objects)
     assert any(source.source_kind.value == "context" for source in source_objects)
+
+
+def test_settings_expand_windows_style_env_paths(monkeypatch, tmp_path):
+    local_app_data = tmp_path / "localappdata"
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setenv("PSI_MCP_DATA_DIR", r"%LOCALAPPDATA%\psi-coprocessor-mcp")
+    monkeypatch.delenv("PSI_MCP_DB_PATH", raising=False)
+    monkeypatch.delenv("PSI_MCP_EXPORT_DIR", raising=False)
+
+    settings = ServerSettings.from_env()
+
+    assert settings.data_dir == local_app_data / "psi-coprocessor-mcp"
+    assert settings.database_path == settings.data_dir / "psi.sqlite3"
+    assert settings.export_dir == settings.data_dir / "exports"
