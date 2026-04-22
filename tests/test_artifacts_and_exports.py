@@ -17,7 +17,10 @@ def test_artifact_sync_generates_full_bundle(service, repository):
         project_name="Artifact Project",
     )
     synced = service.sync_artifacts(result["run_id"])
+    checked = service.check_compliance(result["run_id"], action="artifact_promotion")
     assert len(synced["artifacts"]) == 21
+    assert synced["compliance_report"]["status"] == checked["status"]
+    assert synced["compliance_report"]["blocking"] == checked["blocking"]
     artifact_types = {artifact["artifact_type"] for artifact in synced["artifacts"]}
     assert "field_state_register" in artifact_types
     stored = repository.list_artifacts(result["run_id"])

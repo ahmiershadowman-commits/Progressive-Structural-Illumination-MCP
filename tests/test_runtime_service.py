@@ -186,6 +186,25 @@ def test_source_audit_detects_duplicates_and_missing_artifacts(service):
     assert any("missing_artifact:" in issue for issue in audit["audit"]["issues"])
 
 
+def test_source_audit_handles_spaced_paths_without_false_posix_noise(service, tmp_path: Path):
+    source_dir = tmp_path / "folder with spaces"
+    source_dir.mkdir()
+    source_file = source_dir / "canonical note.md"
+    source_file.write_text("canonical evidence", encoding="utf-8")
+    result = service.reflect(
+        task="Validate grounded source intake.",
+        attached_context=f"Grounded source: {source_file}\nTyped claim surface: INFERRED/PROVISIONAL.",
+        project_name="Path Audit Project",
+    )
+    audit = service.source_audit(result["run_id"])
+    issues = audit["audit"]["issues"]
+    assert audit["audit"]["stale_references"] == 0
+    assert audit["audit"]["missing_artifacts"] == 0
+    assert not any("/PROVISIONAL" in issue for issue in issues)
+    assert not any(issue == f"missing_artifact:{source_file}" for issue in issues)
+    assert not any(issue == f"stale_reference:{source_file}" for issue in issues)
+
+
 def test_direct_regime_tools_return_authoritative_structures(service):
     result = service.reflect(
         task="Trace the dependency field and preserve competing basins for this architecture change.",

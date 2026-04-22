@@ -99,8 +99,9 @@ LOAD_BEARING_KEYWORDS = {
 }
 SPECULATIVE_CUES = {"maybe", "might", "could", "possibly", "hypothesis", "suspect"}
 UNKNOWN_CUES = {"unknown", "unclear", "not sure", "unresolved"}
-WINDOWS_PATH_PATTERN = r"[A-Za-z]:\\[^\s\"']+"
-POSIX_PATH_PATTERN = r"(?<![A-Za-z]:)(/[^\s\"']+)"
+WINDOWS_PATH_PATTERN = r"[A-Za-z]:\\[^\r\n\"']+"
+POSIX_PATH_PATTERN = r"(?<![A-Za-z]:)(/(?:[^\s\"']+/)+[^\s\"',.;:!?]+)"
+TRAILING_PATH_PUNCTUATION = ".,;:!?)]}"
 VERSION_PATTERN = r"\bv(?:ersion)?\s*(\d+(?:\.\d+)*)\b"
 
 
@@ -502,6 +503,20 @@ def infer_typed_claims(payload: AnalysisPayload) -> list[TypedClaim]:
     return claims
 
 
+def _clean_path_candidate(candidate: str) -> str:
+    return candidate.strip().strip("\"'").rstrip(TRAILING_PATH_PUNCTUATION)
+
+
+def _extract_path_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    for line in text.splitlines():
+        windows_match = re.search(r"[A-Za-z]:\\", line)
+        if windows_match:
+            candidates.append(_clean_path_candidate(line[windows_match.start():]))
+        candidates.extend(_clean_path_candidate(match) for match in re.findall(POSIX_PATH_PATTERN, line))
+    return unique_preserve_order(candidate for candidate in candidates if candidate)
+
+
 def infer_source_objects(payload: AnalysisPayload) -> list[SourceObject]:
     records: list[SourceObject] = []
     sources: list[tuple[SourceKind, str, str]] = [
@@ -515,9 +530,7 @@ def infer_source_objects(payload: AnalysisPayload) -> list[SourceObject]:
         stripped = text.strip()
         if not stripped:
             continue
-        path_candidates = unique_preserve_order(
-            re.findall(WINDOWS_PATH_PATTERN, stripped) + re.findall(POSIX_PATH_PATTERN, stripped)
-        )[:8]
+        path_candidates = _extract_path_candidates(stripped)[:8]
         version_match = re.search(VERSION_PATTERN, stripped, flags=re.IGNORECASE)
         records.append(
             SourceObject(

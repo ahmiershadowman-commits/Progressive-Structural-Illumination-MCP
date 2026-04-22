@@ -247,7 +247,7 @@ class PsiService:
             draft=summary.expert_summary,
             attached_context="\n".join(
                 unique_preserve_order(
-                    [source.title for source in run_state.state.sources]
+                    [str(source.metadata.get("first_line", source.title)) for source in run_state.state.sources]
                     + [claim.statement for claim in run_state.state.C[:8]]
                 )
             ),
@@ -1373,7 +1373,14 @@ class PsiService:
         final_artifacts, pointers = generate_artifacts(context)
         for artifact in final_artifacts:
             self.repository.save_artifact(run_id, artifact)
+        final_artifacts = self.repository.list_artifacts(run_id)
         run_state.artifacts = pointers
+        self._audit_sources(run_state)
+        run_state.state.compliance = evaluate_compliance(
+            run_state=run_state,
+            artifacts=final_artifacts,
+            action="artifact_promotion",
+        )
         self._refresh_control_state(
             run_state,
             artifacts=final_artifacts,

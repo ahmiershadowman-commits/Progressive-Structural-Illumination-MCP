@@ -8,8 +8,23 @@ from pathlib import Path
 from ..models import ArtifactSnapshot, ArtifactType, SourceObject
 from ..utils import unique_preserve_order
 
-WINDOWS_PATH_PATTERN = r"[A-Za-z]:\\[^\s\"']+"
-POSIX_PATH_PATTERN = r"(?<![A-Za-z]:)(/[^\s\"']+)"
+WINDOWS_PATH_PATTERN = r"[A-Za-z]:\\[^\r\n\"']+"
+POSIX_PATH_PATTERN = r"(?<![A-Za-z]:)(/(?:[^\s\"']+/)+[^\s\"',.;:!?]+)"
+TRAILING_PATH_PUNCTUATION = ".,;:!?)]}"
+
+
+def _clean_path_candidate(candidate: str) -> str:
+    return candidate.strip().strip("\"'").rstrip(TRAILING_PATH_PUNCTUATION)
+
+
+def _extract_path_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    for line in text.splitlines():
+        windows_match = re.search(r"[A-Za-z]:\\", line)
+        if windows_match:
+            candidates.append(_clean_path_candidate(line[windows_match.start():]))
+        candidates.extend(_clean_path_candidate(match) for match in re.findall(POSIX_PATH_PATTERN, line))
+    return unique_preserve_order(candidate for candidate in candidates if candidate)
 
 
 def _candidate_paths(source: SourceObject) -> list[str]:
@@ -18,11 +33,12 @@ def _candidate_paths(source: SourceObject) -> list[str]:
     for value in metadata.get("path_candidates", []):
         if isinstance(value, str) and value:
             candidates.append(value)
+    if candidates:
+        return unique_preserve_order(candidates)[:8]
     for raw in (source.locator, source.title, metadata.get("first_line", "")):
         if not raw:
             continue
-        candidates.extend(re.findall(WINDOWS_PATH_PATTERN, raw))
-        candidates.extend(re.findall(POSIX_PATH_PATTERN, raw))
+        candidates.extend(_extract_path_candidates(raw))
     return unique_preserve_order(candidates)[:8]
 
 
