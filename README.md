@@ -18,28 +18,49 @@ It ships as a typed Python package with:
 
 ## Quick Start
 
+**No clone needed.** Add this to your `claude_desktop_config.json` (or equivalent MCP host config):
+
+```json
+{
+  "mcpServers": {
+    "psi-coprocessor": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP",
+        "psi-coprocessor-mcp",
+        "stdio"
+      ]
+    }
+  }
+}
+```
+
+Or run directly:
+
+```sh
+uvx --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp stdio
+```
+
+For streamable HTTP:
+
+```sh
+uvx --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp http --port 8765
+```
+
+Recommended host routing instruction:
+
+> When a task involves ambiguity, hidden dependencies, contradiction, scope drift, architecture design, debugging dead ends, or revision of prior conclusions, call `psi.reflect` before finalizing a plan, patch, or design.
+
+## Local Dev
+
 ```powershell
 uv sync --extra dev
 uv run psi-coprocessor-mcp diagnose
 uv run psi-coprocessor-mcp stdio
 ```
 
-If you run `uv` commands from a Windows synced folder such as OneDrive and hit a hardlink error, use:
-
-```powershell
-$env:UV_LINK_MODE = "copy"
-uv sync --extra dev
-```
-
-For streamable HTTP:
-
-```powershell
-uv run psi-coprocessor-mcp http --port 8765
-```
-
-Recommended host routing instruction:
-
-> When a task involves ambiguity, hidden dependencies, contradiction, scope drift, architecture design, debugging dead ends, or revision of prior conclusions, call `psi.reflect` before finalizing a plan, patch, or design.
+If you're on Windows with OneDrive sync and hit hardlink errors, prefix with `$env:UV_LINK_MODE = "copy"`.
 
 ## Documentation
 

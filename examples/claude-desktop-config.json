@@ -1,17 +1,13 @@
 {
   "mcpServers": {
     "psi-coprocessor": {
-      "command": "uv",
+      "command": "uvx",
       "args": [
-        "--directory",
-        "C:\\Users\\Ashbi\\OneDrive\\Documents\\GitHub\\Progressive Structural Illumination MCP\\Progressive Structural Illumination MCP",
-        "run",
+        "--from",
+        "git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP",
         "psi-coprocessor-mcp",
         "stdio"
-      ],
-      "env": {
-        "PSI_MCP_DATA_DIR": "%LOCALAPPDATA%\\psi-coprocessor-mcp"
-      }
+      ]
     }
   }
 }

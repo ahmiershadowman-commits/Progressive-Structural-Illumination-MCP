@@ -10,8 +10,8 @@ It exists to stop source drift during future audits and migrations.
 
 These are the highest-authority build sources for the PSI MCP:
 
-1. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\master-methodology-psi-integrated-v4-surgical.md`
-2. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\psi_normalization_map_v2_surgical.docx`
+1. Internal research documentation: PSI methodology core specification (v4, surgical variant)
+2. Internal research documentation: PSI normalization and control layer specification (v2, surgical variant)
 
 Use them together:
 
@@ -22,12 +22,12 @@ Use them together:
 
 These are not the top authority, but they contain retained nuance that informs interpretation when the primary pair compresses or assumes earlier material:
 
-1. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\master-methodology-psi-integrated-v3-ai.md`
-2. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\master-methodology-psi-integrated-v2.md`
-3. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\master-methodology-psi-integrated.md`
-4. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\master-methodology.md`
-5. `C:\Users\Ashbi\OneDrive\Research\AI Prompts and Plugins\unified_abductive_synthesis_and_closure_pipeline_revised.md`
-6. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\psi_normalization_map.docx`
+1. Internal research documentation: PSI methodology core specification (v3, AI integration variant)
+2. Internal research documentation: PSI methodology core specification (v2)
+3. Internal research documentation: PSI methodology core specification (initial version)
+4. Internal research documentation: Pre-PSI baseline methodology specification
+5. Internal research documentation: Unified synthesis and closure pipeline specification
+6. Internal research documentation: PSI normalization and control layer specification (v1)
 
 Interpretation rule:
 
@@ -47,8 +47,8 @@ Important retained precursor nuances:
 
 These are not ontology authorities, but they are methodology-bearing exemplars of how the method is expected to run in practice:
 
-1. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\superpowers\specs\2026-04-17-neuro-decomp-completion-design.md`
-2. `C:\Users\Ashbi\OneDrive\Research\Neuro\docs\superpowers\plans\2026-04-17-neuro-decomp-completion.md`
+1. Internal applied example: Neuro decomposition completion design specification
+2. Internal applied example: Neuro decomposition completion execution plan
 
 Use them for:
 
@@ -83,10 +83,10 @@ Evaluation rule:
 
 These may still be useful as pressure-tests, but they are not canonical build authority:
 
-- `C:\Users\Ashbi\OneDrive\Research\AI Prompts and Plugins\MCP stuff.txt`
-- `C:\Users\Ashbi\OneDrive\Research\AI Prompts and Plugins\Directives.txt`
-- `C:\Users\Ashbi\OneDrive\Research\AI Prompts and Plugins\EXECUTION_PIPELINE.txt`
-- `C:\Users\Ashbi\OneDrive\Research\AI Prompts and Plugins\WORK_STACK_V2.txt`
+- Internal development notes: MCP hardening and structural specification
+- Internal development notes: Execution directives and workflows
+- Internal development notes: Execution pipeline specification
+- Internal development notes: Work stack and execution order (v2)
 
 Classification:
 

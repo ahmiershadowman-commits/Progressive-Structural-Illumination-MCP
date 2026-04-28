@@ -7,7 +7,39 @@
 - no cloud services
 - no remote accounts
 
-## Local Setup
+## Install from GitHub (no clone required)
+
+Any MCP-capable agent or host can install directly from the repo:
+
+```sh
+uvx --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp stdio
+```
+
+### Claude Desktop
+
+Paste this into your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "psi-coprocessor": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP",
+        "psi-coprocessor-mcp",
+        "stdio"
+      ]
+    }
+  }
+}
+```
+
+Data is stored automatically in `%LOCALAPPDATA%\psi-coprocessor-mcp` on Windows or `~/.psi-coprocessor-mcp` on macOS/Linux. Override with `PSI_MCP_DATA_DIR` if you want a custom location.
+
+## Local Dev Setup
+
+Clone the repo, then:
 
 ```powershell
 uv sync --extra dev
@@ -22,12 +54,13 @@ $env:UV_LINK_MODE = "copy"
 
 before `uv sync`, `uv run`, or `uv build` to avoid hardlink failures in the uv cache.
 
-The server stores local state in:
+## Data Location
 
 - Windows default: `%LOCALAPPDATA%\psi-coprocessor-mcp`
-- override with `PSI_MCP_DATA_DIR`
+- macOS/Linux default: `~/.psi-coprocessor-mcp`
+- Override with `PSI_MCP_DATA_DIR`
 
-Optional environment variables:
+## Environment Variables
 
 - `PSI_MCP_DATA_DIR`
 - `PSI_MCP_DB_PATH`
@@ -41,7 +74,7 @@ Optional environment variables:
 
 `PSI_MCP_DATA_DIR`, `PSI_MCP_DB_PATH`, and `PSI_MCP_EXPORT_DIR` support `%VAR%` and `~` expansion on the server side.
 
-## Running
+## Running (local dev)
 
 ### STDIO
 
