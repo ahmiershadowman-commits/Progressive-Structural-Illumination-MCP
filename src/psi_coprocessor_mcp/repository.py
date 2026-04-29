@@ -2361,4 +2361,16 @@ class Repository:
             "interlocks": self.list_interlocks(run_id),
             "traces": self.list_trace_steps(run_id),
             "gaps": self.list_gap_records(run_id),
-    
+            "searches": self.list_search_records(run_id),
+            "basins": self.list_basin_records(run_id),
+            "skeptic_findings": self.list_skeptic_findings(run_id),
+            "antipattern_findings": self.list_antipattern_findings(run_id),
+            "anchors": self.list_anchors(project_id) if project_id else [],
+            "tensions": self.list_tensions(project_id) if project_id else [],
+            "hypotheses": self.list_hypotheses(project_id) if project_id else [],
+            "discriminators": self.list_discriminators(project_id) if project_id else [],
+            "constraints": self.list_constraints(project_id) if project_id else [],
+            "supersessions": self.list_supersession_history(run_id),
+            "typed_claims": self.list_typed_claims(run_id),
+            "compliance": self.get_compliance_report(run_id),
+        }
