@@ -57,7 +57,7 @@ def _block_on_durability(output: dict[str, object], block_on_poison: bool) -> No
 
 def _read_only_service(settings: ServerSettings) -> PsiService:
     database = Database(settings)
-    repository = Repository(database)
+    repository = Repository(database, skip_backfill=True)
     return PsiService(repository, settings)
 
 

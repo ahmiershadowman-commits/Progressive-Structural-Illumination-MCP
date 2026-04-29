@@ -37,6 +37,16 @@ Paste this into your `claude_desktop_config.json`:
 
 Data is stored automatically in `%LOCALAPPDATA%\psi-coprocessor-mcp` on Windows or `~/.psi-coprocessor-mcp` on macOS/Linux. Override with `PSI_MCP_DATA_DIR` if you want a custom location.
 
+## Updating
+
+`uvx` caches the git installation by resolved SHA. To pull the latest version from `main`, run:
+
+```sh
+uvx --refresh --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp diagnose
+```
+
+After that command completes, restart Claude Desktop (or whichever MCP host you use) and the new version is active. Your SQLite database and run history are unaffected — migrations run automatically on first connect with the new build.
+
 ## Local Dev Setup
 
 Clone the repo, then:

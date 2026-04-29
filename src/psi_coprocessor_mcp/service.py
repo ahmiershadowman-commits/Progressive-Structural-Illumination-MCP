@@ -414,6 +414,11 @@ class PsiService:
         normalized = decision.strip().upper()
         if normalized == "ROLLBACK":
             normalized = TransitionDecision.ROLLBACK_REQUIRED.value
+        valid = {member.value for member in TransitionDecision}
+        if normalized not in valid:
+            raise ValueError(
+                f"Unknown transition decision {decision!r}. Valid values: {sorted(valid)}"
+            )
         return TransitionDecision(normalized)
 
     def _infer_run_class(self, run_state: PsiRunState) -> RunClass:

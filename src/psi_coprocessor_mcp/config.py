@@ -45,7 +45,13 @@ class ServerSettings:
         export_dir = _expand_path(os.getenv("PSI_MCP_EXPORT_DIR", data_dir / "exports"))
         default_durability_mode = os.getenv("PSI_MCP_DURABILITY_MODE", "blocking").lower()
         http_host = os.getenv("PSI_MCP_HTTP_HOST", "127.0.0.1")
-        http_port = int(os.getenv("PSI_MCP_HTTP_PORT", "8765"))
+        _raw_port = os.getenv("PSI_MCP_HTTP_PORT", "8765")
+        try:
+            http_port = int(_raw_port)
+        except ValueError as exc:
+            raise ValueError(
+                f"PSI_MCP_HTTP_PORT must be an integer; got {_raw_port!r}"
+            ) from exc
         http_mount_path = os.getenv("PSI_MCP_HTTP_PATH", "/mcp")
         log_level = os.getenv("PSI_MCP_LOG_LEVEL", "INFO").upper()
         enable_seed_user_lane = os.getenv("PSI_MCP_SEED_USER_LANE", "true").lower() not in {

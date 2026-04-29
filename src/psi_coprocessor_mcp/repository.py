@@ -66,9 +66,10 @@ def _parse_datetime(value: str | None) -> datetime:
     return datetime.fromisoformat(value) if value else datetime.fromisoformat(utc_now_iso())
 
 class Repository:
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, skip_backfill: bool = False):
         self.database = database
-        self._backfill_retrieval_index()
+        if not skip_backfill:
+            self._backfill_retrieval_index()
 
     def _new_id(self, prefix: str) -> str:
         return f"{prefix}_{uuid4().hex}"

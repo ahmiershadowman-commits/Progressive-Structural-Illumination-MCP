@@ -52,6 +52,16 @@ Recommended host routing instruction:
 
 > When a task involves ambiguity, hidden dependencies, contradiction, scope drift, architecture design, debugging dead ends, or revision of prior conclusions, call `psi.reflect` before finalizing a plan, patch, or design.
 
+## Updating
+
+`uvx` caches by git SHA. Pull the latest version with:
+
+```sh
+uvx --refresh --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp diagnose
+```
+
+Then restart your MCP host. Run history and database are untouched — migrations apply automatically.
+
 ## Local Dev
 
 ```powershell
