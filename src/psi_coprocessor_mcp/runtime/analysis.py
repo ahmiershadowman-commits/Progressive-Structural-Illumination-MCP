@@ -461,7 +461,7 @@ def _claim_scaffold_boundary(statement: str, durability: DurabilityClass) -> Sca
     )
 
 
-def infer_typed_claims(payload: AnalysisPayload) -> list[TypedClaim]:
+def infer_typed_claims(payload: AnalysisPayload, run_id: str = "") -> list[TypedClaim]:
     raw_claims: list[tuple[str, str]] = []
     sources = [
         ("task", payload.task),
@@ -486,7 +486,7 @@ def infer_typed_claims(payload: AnalysisPayload) -> list[TypedClaim]:
         durability = _claim_durability(statement)
         claims.append(
             TypedClaim(
-                id=f"claim_{idx}",
+                id=f"claim::{run_id}::{idx}" if run_id else f"claim_{idx}",
                 statement=statement,
                 provenance=provenance,
                 load_bearing=load_bearing,
@@ -517,7 +517,7 @@ def _extract_path_candidates(text: str) -> list[str]:
     return unique_preserve_order(candidate for candidate in candidates if candidate)
 
 
-def infer_source_objects(payload: AnalysisPayload) -> list[SourceObject]:
+def infer_source_objects(payload: AnalysisPayload, run_id: str = "") -> list[SourceObject]:
     records: list[SourceObject] = []
     sources: list[tuple[SourceKind, str, str]] = [
         (SourceKind.TASK, "task", payload.task),
@@ -534,7 +534,7 @@ def infer_source_objects(payload: AnalysisPayload) -> list[SourceObject]:
         version_match = re.search(VERSION_PATTERN, stripped, flags=re.IGNORECASE)
         records.append(
             SourceObject(
-                id=f"source::{kind.value}::{sha256_text(stripped)[:12]}",
+                id=f"source::{run_id}::{kind.value}::{sha256_text(stripped)[:12]}" if run_id else f"source::{kind.value}::{sha256_text(stripped)[:12]}",
                 source_kind=kind,
                 title=stripped.splitlines()[0][:120],
                 locator=locator,

@@ -169,7 +169,7 @@ class PsiService:
         frictions: list[FrictionSignal],
         durability_blocked: bool,
     ) -> None:
-        run_state.state.C = infer_typed_claims(payload)
+        run_state.state.C = infer_typed_claims(payload, run_id=run_state.metadata.run_id)
         run_state.state.active_operators = detect_operator_families(payload)
         run_state.state.control_families = build_control_family_states(run_state.metadata.mode)
         run_state.state.friction_routing = build_friction_routing(
@@ -191,14 +191,16 @@ class PsiService:
         payload: AnalysisPayload,
         frictions: list[FrictionSignal],
     ) -> None:
-        run_state.state.sources = infer_source_objects(payload)
-        run_state.state.components = extract_components(payload, run_state.state.C)
-        run_state.state.state_variables = extract_state_variables(payload, run_state.state.C, frictions)
+        run_id = run_state.metadata.run_id
+        run_state.state.sources = infer_source_objects(payload, run_id=run_id)
+        run_state.state.components = extract_components(payload, run_state.state.C, run_id=run_id)
+        run_state.state.state_variables = extract_state_variables(payload, run_state.state.C, frictions, run_id=run_id)
         run_state.state.primitive_operators = extract_primitive_operators(
             payload=payload,
             active_operators=run_state.state.active_operators,
             components=run_state.state.components,
             state_variables=run_state.state.state_variables,
+            run_id=run_id,
         )
         run_state.state.interlocks = extract_interlocks(
             components=run_state.state.components,
@@ -211,13 +213,14 @@ class PsiService:
             primitive_operators=run_state.state.primitive_operators,
             frictions=frictions,
         )
-        run_state.state.gaps = derive_gap_records(payload, run_state.state.traces, frictions)
+        run_state.state.gaps = derive_gap_records(payload, run_state.state.traces, frictions, run_id=run_id)
         run_state.state.searches = derive_search_records(run_state.state.gaps)
         run_state.state.basins = derive_basin_records(
             payload=payload,
             hypotheses=run_state.state.H,
             tensions=run_state.state.U,
             frictions=frictions,
+            run_id=run_id,
         )
         skeptic_findings, antipattern_findings = generate_stress_findings(run_state)
         run_state.state.skeptic_findings = skeptic_findings

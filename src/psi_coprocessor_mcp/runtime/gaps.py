@@ -49,6 +49,7 @@ def derive_gap_records(
     payload: AnalysisPayload,
     traces: list[TraceStep],
     frictions: list[FrictionSignal],
+    run_id: str = "",
 ) -> list[GapRecord]:
     gaps: list[GapRecord] = []
     for trace in traces:
@@ -81,7 +82,7 @@ def derive_gap_records(
         }[friction.friction_type]
         gaps.append(
             GapRecord(
-                id=f"gap::{sha256_text(friction.rationale)[:12]}",
+                id=f"gap::{run_id}::{sha256_text(friction.rationale)[:12]}" if run_id else f"gap::{sha256_text(friction.rationale)[:12]}",
                 title=friction.friction_type.value.lower(),
                 gap_type=GapType.INTEGRATION,
                 description=friction.rationale,
@@ -121,12 +122,13 @@ def derive_basin_records(
     hypotheses: list[Hypothesis],
     tensions: list[Tension],
     frictions: list[FrictionSignal],
+    run_id: str = "",
 ) -> list[BasinRecord]:
     basins: list[BasinRecord] = []
     for hypothesis in hypotheses:
         basins.append(
             BasinRecord(
-                id=f"basin::{hypothesis.id or sha256_text(hypothesis.title)[:12]}",
+                id=f"basin::{run_id}::{hypothesis.id or sha256_text(hypothesis.title)[:12]}" if run_id else f"basin::{hypothesis.id or sha256_text(hypothesis.title)[:12]}",
                 title=hypothesis.title,
                 basin_type=BasinType.LITERAL,
                 description=hypothesis.description,
@@ -143,7 +145,7 @@ def derive_basin_records(
     if tensions:
         basins.append(
             BasinRecord(
-                id=f"basin::reinterpretive::{sha256_text(tensions[0].title)[:12]}",
+                id=f"basin::{run_id}::reinterpretive::{sha256_text(tensions[0].title)[:12]}" if run_id else f"basin::reinterpretive::{sha256_text(tensions[0].title)[:12]}",
                 title="reinterpretive basin",
                 basin_type=BasinType.REINTERPRETIVE,
                 description="Preserve alternate readings while tensions remain unresolved.",
@@ -160,7 +162,7 @@ def derive_basin_records(
     if any(friction.friction_type == FrictionType.CONTINUITY_POISON for friction in frictions):
         basins.append(
             BasinRecord(
-                id=f"basin::failure::{sha256_text(payload.task)[:12]}",
+                id=f"basin::{run_id}::failure::{sha256_text(payload.task)[:12]}" if run_id else f"basin::failure::{sha256_text(payload.task)[:12]}",
                 title="failure-mode basin",
                 basin_type=BasinType.FAILURE_MODE,
                 description="Known-bad continuity remains a live competing explanation of the current surface.",
@@ -177,7 +179,7 @@ def derive_basin_records(
     if not basins:
         basins.append(
             BasinRecord(
-                id=f"basin::null::{sha256_text(payload.task)[:12]}",
+                id=f"basin::{run_id}::null::{sha256_text(payload.task)[:12]}" if run_id else f"basin::null::{sha256_text(payload.task)[:12]}",
                 title="null basin",
                 basin_type=BasinType.NULL,
                 description="No alternate basin is yet well-articulated.",

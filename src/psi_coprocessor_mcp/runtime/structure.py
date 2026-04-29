@@ -83,12 +83,12 @@ def _component_candidates(payload: AnalysisPayload, claims: list[TypedClaim]) ->
     return unique_preserve_order(candidates)[:16]
 
 
-def extract_components(payload: AnalysisPayload, claims: list[TypedClaim]) -> list[PrimitiveComponent]:
+def extract_components(payload: AnalysisPayload, claims: list[TypedClaim], run_id: str = "") -> list[PrimitiveComponent]:
     components: list[PrimitiveComponent] = []
     for candidate in _component_candidates(payload, claims):
         components.append(
             PrimitiveComponent(
-                id=f"component::{sha256_text(candidate)[:12]}",
+                id=f"component::{run_id}::{sha256_text(candidate)[:12]}" if run_id else f"component::{sha256_text(candidate)[:12]}",
                 name=candidate,
                 description=f"Retained component candidate derived from active PSI material: {candidate}",
                 component_kind="path" if any(ch in candidate for ch in {"/", "\\", "."}) else "structural-object",
@@ -104,6 +104,7 @@ def extract_state_variables(
     payload: AnalysisPayload,
     claims: list[TypedClaim],
     frictions: list[FrictionSignal],
+    run_id: str = "",
 ) -> list[StateVariableRecord]:
     text = payload.source_text.lower()
     variables: list[StateVariableRecord] = []
@@ -112,7 +113,7 @@ def extract_state_variables(
             write_roles = [signal.friction_type.value for signal in frictions if kind in signal.rationale.lower()]
             variables.append(
                 StateVariableRecord(
-                    id=f"state::{name}",
+                    id=f"state::{run_id}::{name}" if run_id else f"state::{name}",
                     name=name,
                     description=description,
                     variable_kind=kind,
@@ -132,6 +133,7 @@ def extract_primitive_operators(
     active_operators: list[OperatorFamily],
     components: list[PrimitiveComponent],
     state_variables: list[StateVariableRecord],
+    run_id: str = "",
 ) -> list[PrimitiveOperatorRecord]:
     component_ref = components[0].id if components else ""
     variable_refs = {variable.variable_kind: variable.id for variable in state_variables}
@@ -149,7 +151,7 @@ def extract_primitive_operators(
         name, action, variable_kind = family_defaults[family]
         operators.append(
             PrimitiveOperatorRecord(
-                id=f"operator::{family.value}",
+                id=f"operator::{run_id}::{family.value}" if run_id else f"operator::{family.value}",
                 name=name,
                 family=family,
                 object_ref=component_ref,
