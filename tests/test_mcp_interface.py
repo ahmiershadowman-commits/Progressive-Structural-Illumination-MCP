@@ -43,6 +43,16 @@ async def _call_stdio(tmp_path: Path):
             )
             run_id = reflect.structuredContent["run_id"]
             state = await session.call_tool("psi.run.get_state", {"run_id": run_id})
+            explicit_run_id = "psi-stdio-explicit-20260429-001"
+            explicit_started = await session.call_tool(
+                "psi.run.start",
+                {
+                    "title": "Explicit stdio run",
+                    "scope": "Create a caller-addressable PSI run through MCP.",
+                    "run_id": explicit_run_id,
+                },
+            )
+            explicit_state = await session.call_tool("psi.run.get_state", {"run_id": explicit_run_id})
             compliance_before = await session.read_resource(f"psi://run/{run_id}/compliance")
             summary_resource = await session.read_resource(f"psi://run/{run_id}/summary")
             compliance_after = await session.read_resource(f"psi://run/{run_id}/compliance")
@@ -55,6 +65,8 @@ async def _call_stdio(tmp_path: Path):
                 "prompt_names": [prompt_item.name for prompt_item in prompts.prompts],
                 "reflect": reflect.structuredContent,
                 "state": state.structuredContent,
+                "explicit_started": explicit_started.structuredContent,
+                "explicit_state": explicit_state.structuredContent,
                 "compliance_before_summary_read": json.loads(compliance_before.contents[0].text),
                 "summary_resource": json.loads(summary_resource.contents[0].text),
                 "compliance_after_summary_read": json.loads(compliance_after.contents[0].text),
@@ -144,6 +156,9 @@ async def test_stdio_mcp_surface(tmp_path: Path):
     assert "start_psi_pass" in result["prompt_names"]
     assert result["reflect"]["run_id"]
     assert result["state"]["compact"]["run_id"] == result["reflect"]["run_id"]
+    assert result["explicit_started"]["run_id"] == "psi-stdio-explicit-20260429-001"
+    assert result["explicit_started"]["resumed"] is False
+    assert result["explicit_state"]["compact"]["run_id"] == "psi-stdio-explicit-20260429-001"
     assert result["summary_resource"]["run_id"] == result["reflect"]["run_id"]
     assert result["compliance_after_summary_read"] == result["compliance_before_summary_read"]
     assert "Progressive Structural Illumination" in result["resource_text"]

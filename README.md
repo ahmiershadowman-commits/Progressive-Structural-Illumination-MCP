@@ -90,4 +90,4 @@ If you're on Windows with OneDrive sync and hit hardlink errors, prefix with `$e
 uv run pytest
 ```
 
-Current test status: `26 passed`
+Current test status: `28 passed`

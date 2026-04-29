@@ -524,22 +524,26 @@ class PsiService:
         durability_mode: str | None = None,
     ) -> dict[str, object]:
         if run_id:
-            run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
-            self._refresh_control_state(run_state)
-            return {
-                "project_id": run_state.metadata.project_id,
-                "run_id": run_state.metadata.run_id,
-                "mode": run_state.metadata.mode.value,
-                "status": run_state.metadata.status.value,
-                "resumed": True,
-                "state": run_state.machine_readable(),
-            }
+            try:
+                run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+            except KeyError:
+                pass
+            else:
+                self._refresh_control_state(run_state)
+                return {
+                    "project_id": run_state.metadata.project_id,
+                    "run_id": run_state.metadata.run_id,
+                    "mode": run_state.metadata.mode.value,
+                    "status": run_state.metadata.status.value,
+                    "resumed": True,
+                    "state": run_state.machine_readable(),
+                }
         project = self._ensure_project(project_id, project_name, scope)
         run_mode = RunMode(mode) if isinstance(mode, str) else mode
         payload = build_analysis_payload(scope, attached_context=attached_context)
         run_state = PsiRunState(
             metadata=RunMetadata(
-                run_id=self._new_id("run"),
+                run_id=run_id or self._new_id("run"),
                 project_id=project.project_id if project else None,
                 title=title,
                 mode=run_mode,
@@ -608,6 +612,7 @@ class PsiService:
             project_id=project_id,
             project_name=project_name,
             durability_mode=durability_mode,
+            run_id=run_id,
         )
         return self._hydrate_run_state(self.repository.get_run_state(started["run_id"]))
 

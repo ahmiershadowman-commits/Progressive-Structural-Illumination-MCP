@@ -171,6 +171,42 @@ def test_state_management_and_transition_alias_are_canonical(service):
     assert transition["decision"] == "ROLLBACK_REQUIRED"
 
 
+def test_start_run_creates_or_resumes_explicit_run_id(service):
+    run_id = "psi-smoke-explicit-20260429-001"
+
+    started = service.start_run(
+        title="Explicit run",
+        scope="Create a caller-addressable PSI run.",
+        project_name="Explicit Run Project",
+        run_id=run_id,
+    )
+    resumed = service.start_run(
+        title="Ignored on resume",
+        scope="Resume the same caller-addressable PSI run.",
+        project_name="Explicit Run Project",
+        run_id=run_id,
+    )
+
+    assert started["run_id"] == run_id
+    assert started["resumed"] is False
+    assert service.get_run_state(run_id)["compact"]["run_id"] == run_id
+    assert resumed["run_id"] == run_id
+    assert resumed["resumed"] is True
+
+
+def test_reflect_preserves_new_explicit_run_id(service):
+    run_id = "psi-reflect-explicit-20260429-001"
+
+    result = service.reflect(
+        task="Use the caller-supplied run id when opening a new reflected PSI pass.",
+        project_name="Explicit Reflect Project",
+        run_id=run_id,
+    )
+
+    assert result["run_id"] == run_id
+    assert service.get_run_state(run_id)["compact"]["run_id"] == run_id
+
+
 def test_source_audit_detects_duplicates_and_missing_artifacts(service):
     missing_path = r"C:\definitely-missing\psi_contract.md"
     result = service.reflect(
