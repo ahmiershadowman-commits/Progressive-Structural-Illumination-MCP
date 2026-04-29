@@ -883,7 +883,7 @@ class RunStateVector(PSIModel):
     W: WholeFieldRepresentation = Field(default_factory=WholeFieldRepresentation)
     L: LensState = Field(default_factory=LensState)
     B: ScopeBoundaries = Field(default_factory=ScopeBoundaries)
-    O: VisibilityEvent | None = None
+    O: VisibilityEvent | None = None  # noqa: E741 - PSI state vector uses canonical O slot.
     sources: list[SourceObject] = Field(default_factory=list)
     C: list[TypedClaim] = Field(default_factory=list)
     components: list[PrimitiveComponent] = Field(default_factory=list)

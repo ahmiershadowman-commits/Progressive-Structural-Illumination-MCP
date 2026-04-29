@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from psi_coprocessor_mcp.models import MemoryLane
-
 
 def _fixture_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")

@@ -109,6 +109,8 @@ class Database:
     def __init__(self, settings: ServerSettings):
         self.settings = settings
         self.settings.ensure_directories()
+        if self.settings.database_path is None:
+            raise RuntimeError("ServerSettings.database_path must be initialized before connecting")
         self.connection = connect_database(self.settings.database_path)
         apply_migrations(self.connection)
         seed_builtin_memory(self.connection, settings)

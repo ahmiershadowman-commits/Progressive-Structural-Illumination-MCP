@@ -1,0 +1,9 @@
+{
+  "include": [
+    "src/psi_coprocessor_mcp/config.py",
+    "src/psi_coprocessor_mcp/db.py",
+    "src/psi_coprocessor_mcp/repository.py"
+  ],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic"
+}

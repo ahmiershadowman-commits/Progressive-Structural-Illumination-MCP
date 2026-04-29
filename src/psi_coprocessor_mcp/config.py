@@ -37,6 +37,12 @@ class ServerSettings:
             self.database_path = self.data_dir / "psi.sqlite3"
         if self.export_dir is None:
             self.export_dir = self.data_dir / "exports"
+        if not self.http_mount_path:
+            self.http_mount_path = "/mcp"
+        if not self.http_mount_path.startswith("/"):
+            self.http_mount_path = f"/{self.http_mount_path}"
+        if len(self.http_mount_path) > 1:
+            self.http_mount_path = self.http_mount_path.rstrip("/")
 
     @classmethod
     def from_env(cls) -> "ServerSettings":
@@ -72,6 +78,8 @@ class ServerSettings:
         )
 
     def ensure_directories(self) -> None:
+        if self.database_path is None or self.export_dir is None:
+            raise RuntimeError("ServerSettings paths must be initialized before creating directories")
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.export_dir.mkdir(parents=True, exist_ok=True)

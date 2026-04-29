@@ -12,7 +12,6 @@ from ..models import (
     PrimitiveOperatorRecord,
     RelationType,
     InterlockRelation,
-    SourceObject,
     StateVariableRecord,
     TypedClaim,
 )

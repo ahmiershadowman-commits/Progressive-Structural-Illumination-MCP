@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import socket
 import subprocess
@@ -13,6 +14,9 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
+
+from psi_coprocessor_mcp.app import create_http_app
+from psi_coprocessor_mcp.config import ServerSettings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +43,9 @@ async def _call_stdio(tmp_path: Path):
             )
             run_id = reflect.structuredContent["run_id"]
             state = await session.call_tool("psi.run.get_state", {"run_id": run_id})
+            compliance_before = await session.read_resource(f"psi://run/{run_id}/compliance")
+            summary_resource = await session.read_resource(f"psi://run/{run_id}/summary")
+            compliance_after = await session.read_resource(f"psi://run/{run_id}/compliance")
             resource = await session.read_resource("psi://method/current")
             prompt = await session.get_prompt("start_psi_pass", {"task": "build the server"})
             return {
@@ -48,6 +55,9 @@ async def _call_stdio(tmp_path: Path):
                 "prompt_names": [prompt_item.name for prompt_item in prompts.prompts],
                 "reflect": reflect.structuredContent,
                 "state": state.structuredContent,
+                "compliance_before_summary_read": json.loads(compliance_before.contents[0].text),
+                "summary_resource": json.loads(summary_resource.contents[0].text),
+                "compliance_after_summary_read": json.loads(compliance_after.contents[0].text),
                 "resource_text": resource.contents[0].text,
                 "prompt_messages": prompt.messages,
             }
@@ -134,6 +144,8 @@ async def test_stdio_mcp_surface(tmp_path: Path):
     assert "start_psi_pass" in result["prompt_names"]
     assert result["reflect"]["run_id"]
     assert result["state"]["compact"]["run_id"] == result["reflect"]["run_id"]
+    assert result["summary_resource"]["run_id"] == result["reflect"]["run_id"]
+    assert result["compliance_after_summary_read"] == result["compliance_before_summary_read"]
     assert "Progressive Structural Illumination" in result["resource_text"]
     assert result["prompt_messages"]
 
@@ -142,3 +154,11 @@ async def test_stdio_mcp_surface(tmp_path: Path):
 async def test_streamable_http_mcp_surface(tmp_path: Path):
     tools = await _call_http(tmp_path)
     assert "psi.reflect" in tools
+
+
+def test_streamable_http_uses_configured_mount_path(tmp_path: Path):
+    settings = ServerSettings(data_dir=tmp_path / "http-path-data", http_mount_path="/custom-mcp")
+    app = create_http_app(settings)
+    inner_app = app.routes[0].app
+
+    assert [route.path for route in inner_app.routes] == ["/custom-mcp"]

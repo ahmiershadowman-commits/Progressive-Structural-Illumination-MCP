@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,8 +11,6 @@ import yaml
 from .config import ServerSettings
 from .models import (
     Anchor,
-    ApplicabilityAssessment,
-    ArtifactPointers,
     ArtifactType,
     BlastRadiusImpact,
     ComplianceReport,
@@ -31,7 +28,6 @@ from .models import (
     ProjectSummary,
     PsiRunState,
     Regime,
-    RetrievalHit,
     RunMetadata,
     RunClass,
     RunMode,
@@ -89,7 +85,7 @@ from .runtime.structure import (
 )
 from .runtime.summaries import generate_summary_bundle
 from .runtime.tracing import build_trace_steps
-from .utils import canonical_json, compact_json, ensure_directory, sha256_text, unique_preserve_order, utc_now, utc_now_iso
+from .utils import canonical_json, ensure_directory, sha256_text, unique_preserve_order, utc_now
 
 REGIME_EXPLANATIONS = {
     "task_contract_scope_lock": "Defines what object is in play, what is excluded, and what would count as completion.",
@@ -1774,5 +1770,25 @@ class PsiService:
             "mode_profiles": mode_profile_catalog(),
         }
 
+    def read_summary(self, run_id: str) -> dict[str, object]:
+        summary = self.repository.get_run_summary(run_id)
+        run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+        compliance = self.repository.get_compliance_report(run_id) or run_state.state.compliance
+        return {
+            "run_id": run_id,
+            "summary": summary.model_dump(mode="json"),
+            "transition": run_state.state.transition.model_dump(mode="json"),
+            "compliance_report": compliance.model_dump(mode="json") if compliance else {},
+        }
+
     def generate_summary(self, run_id: str) -> dict[str, object]:
-        summary = self.repo
+        summary = self.repository.get_run_summary(run_id)
+        run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+        self._refresh_control_state(run_state, phase_reason="summary", trigger="generate_summary")
+        compliance = self._evaluate_and_store_compliance(run_state, summary, action="summary")
+        return {
+            "run_id": run_id,
+            "summary": summary.model_dump(mode="json"),
+            "transition": run_state.state.transition.model_dump(mode="json"),
+            "compliance_report": compliance.model_dump(mode="json"),
+        }

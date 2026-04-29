@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import TypeVar, cast
 from uuid import uuid4
 
 from .db import Database
@@ -11,7 +12,6 @@ from .models import (
     AntiPatternFinding,
     AntiPatternType,
     Anchor,
-    ApplicabilityAssessment,
     ArtifactSnapshot,
     BasinType,
     BasinRecord,
@@ -37,7 +37,6 @@ from .models import (
     PrimitiveOperatorRecord,
     ProjectSummary,
     PsiRunState,
-    RunClass,
     RetrievalHit,
     RelationType,
     ScaffoldBoundary,
@@ -56,10 +55,13 @@ from .models import Hypothesis as PsiHypothesis
 from .utils import compact_json, utc_now_iso
 
 
-def _loads(value: str | None, fallback: object) -> object:
+T = TypeVar("T")
+
+
+def _loads(value: str | None, fallback: T) -> T:
     if not value:
         return fallback
-    return json.loads(value)
+    return cast(T, json.loads(value))
 
 
 def _parse_datetime(value: str | None) -> datetime:
@@ -2025,62 +2027,72 @@ class Repository:
         )
         entry_id = entry.id or f"memory::{entry.lane.value}::{stable_ref}"
         payload = entry.model_copy(update={"id": entry_id, "updated_at": datetime.fromisoformat(timestamp)})
-        table = {
-            MemoryLane.METHOD: "method_memory",
-            MemoryLane.STABLE_USER: "user_memory",
-            MemoryLane.PROJECT: "project_memory",
-            MemoryLane.RUN_STATE: "run_memory",
-        }[payload.lane]
-        id_column = {
-            MemoryLane.METHOD: None,
-            MemoryLane.STABLE_USER: None,
-            MemoryLane.PROJECT: "project_id",
-            MemoryLane.RUN_STATE: "run_id",
-        }[payload.lane]
         if payload.lane == MemoryLane.PROJECT and not payload.project_id:
             raise ValueError("project_id is required for PROJECT lane commits")
         if payload.lane == MemoryLane.RUN_STATE and not payload.run_id:
             raise ValueError("run_id is required for RUN_STATE lane commits")
-        columns = ["id"]
-        values: list[object] = [payload.id]
-        if id_column == "project_id":
-            columns.append("project_id")
-            values.append(payload.project_id)
-        if id_column == "run_id":
-            columns.append("run_id")
-            values.append(payload.run_id)
-        columns.extend(["memory_key", "title", "content", "tags_json", "metadata_json", "created_at", "updated_at"])
-        values.extend(
-            [
-                payload.key,
-                payload.title,
-                payload.content,
-                compact_json(payload.tags),
-                compact_json(payload.metadata),
-                payload.created_at.isoformat(),
-                payload.updated_at.isoformat(),
-            ]
+
+        base_values = (
+            payload.key,
+            payload.title,
+            payload.content,
+            compact_json(payload.tags),
+            compact_json(payload.metadata),
+            payload.created_at.isoformat(),
+            payload.updated_at.isoformat(),
         )
-        unique_target = {
-            MemoryLane.METHOD: "(memory_key)",
-            MemoryLane.STABLE_USER: "(memory_key)",
-            MemoryLane.PROJECT: "(project_id, memory_key)",
-            MemoryLane.RUN_STATE: "(run_id, memory_key)",
-        }[payload.lane]
-        with self.database.transaction() as connection:
-            connection.execute(
-                f"""
-                INSERT INTO {table} ({', '.join(columns)})
-                VALUES ({', '.join('?' for _ in values)})
-                ON CONFLICT {unique_target} DO UPDATE SET
+        if payload.lane == MemoryLane.METHOD:
+            sql = """
+                INSERT INTO method_memory (id, memory_key, title, content, tags_json, metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (memory_key) DO UPDATE SET
                     title = excluded.title,
                     content = excluded.content,
                     tags_json = excluded.tags_json,
                     metadata_json = excluded.metadata_json,
                     updated_at = excluded.updated_at
-                """,
-                values,
-            )
+                """
+            values: tuple[object, ...] = (payload.id, *base_values)
+        elif payload.lane == MemoryLane.STABLE_USER:
+            sql = """
+                INSERT INTO user_memory (id, memory_key, title, content, tags_json, metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (memory_key) DO UPDATE SET
+                    title = excluded.title,
+                    content = excluded.content,
+                    tags_json = excluded.tags_json,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """
+            values = (payload.id, *base_values)
+        elif payload.lane == MemoryLane.PROJECT:
+            sql = """
+                INSERT INTO project_memory (
+                    id, project_id, memory_key, title, content, tags_json, metadata_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (project_id, memory_key) DO UPDATE SET
+                    title = excluded.title,
+                    content = excluded.content,
+                    tags_json = excluded.tags_json,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """
+            values = (payload.id, payload.project_id, *base_values)
+        else:
+            sql = """
+                INSERT INTO run_memory (id, run_id, memory_key, title, content, tags_json, metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (run_id, memory_key) DO UPDATE SET
+                    title = excluded.title,
+                    content = excluded.content,
+                    tags_json = excluded.tags_json,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """
+            values = (payload.id, payload.run_id, *base_values)
+        with self.database.transaction() as connection:
+            connection.execute(sql, values)
         self._upsert_retrieval_document(
             payload.lane,
             "memory",
@@ -2121,32 +2133,34 @@ class Repository:
         lanes: list[MemoryLane],
         limit: int = 8,
     ) -> list[RetrievalHit]:
-        lane_values = [lane.value for lane in lanes]
-        placeholders = ", ".join("?" for _ in lane_values)
+        if not lanes:
+            return []
+        lane_values = list(dict.fromkeys(lane.value for lane in lanes))
+        lane_filter = [*lane_values, "__psi_no_lane__", "__psi_no_lane__", "__psi_no_lane__", "__psi_no_lane__"][:4]
         parameters: list[object] = []
         if query.strip():
             sanitized_query = " ".join(part for part in query.replace('"', " ").replace("'", " ").split() if part)
-            parameters.extend([sanitized_query, *lane_values, limit])
+            parameters.extend([sanitized_query, *lane_filter, limit])
             rows = self.database.connection.execute(
-                f"""
+                """
                 SELECT rd.lane, rd.document_type, rd.ref_id, rd.title, rd.content, rd.tags_json,
                        rd.metadata_json, bm25(retrieval_documents_fts) AS score
                 FROM retrieval_documents_fts
                 JOIN retrieval_documents rd ON rd.rowid = retrieval_documents_fts.rowid
                 WHERE retrieval_documents_fts MATCH ?
-                  AND rd.lane IN ({placeholders})
+                  AND rd.lane IN (?, ?, ?, ?)
                 ORDER BY score
                 LIMIT ?
                 """,
                 parameters,
             ).fetchall()
         else:
-            parameters.extend([*lane_values, limit])
+            parameters.extend([*lane_filter, limit])
             rows = self.database.connection.execute(
-                f"""
+                """
                 SELECT lane, document_type, ref_id, title, content, tags_json, metadata_json, 0.0 AS score
                 FROM retrieval_documents
-                WHERE lane IN ({placeholders})
+                WHERE lane IN (?, ?, ?, ?)
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
@@ -2172,24 +2186,20 @@ class Repository:
         project_id: str | None = None,
         run_id: str | None = None,
     ) -> list[MemoryEntry]:
-        table = {
-            MemoryLane.METHOD: "method_memory",
-            MemoryLane.STABLE_USER: "user_memory",
-            MemoryLane.PROJECT: "project_memory",
-            MemoryLane.RUN_STATE: "run_memory",
-        }[lane]
-        where = ""
-        parameters: list[object] = []
-        if lane == MemoryLane.PROJECT:
-            where = "WHERE project_id = ?"
-            parameters.append(project_id)
-        if lane == MemoryLane.RUN_STATE:
-            where = "WHERE run_id = ?"
-            parameters.append(run_id)
-        rows = self.database.connection.execute(
-            f"SELECT * FROM {table} {where} ORDER BY updated_at DESC",
-            parameters,
-        ).fetchall()
+        if lane == MemoryLane.METHOD:
+            rows = self.database.connection.execute("SELECT * FROM method_memory ORDER BY updated_at DESC").fetchall()
+        elif lane == MemoryLane.STABLE_USER:
+            rows = self.database.connection.execute("SELECT * FROM user_memory ORDER BY updated_at DESC").fetchall()
+        elif lane == MemoryLane.PROJECT:
+            rows = self.database.connection.execute(
+                "SELECT * FROM project_memory WHERE project_id = ? ORDER BY updated_at DESC",
+                (project_id,),
+            ).fetchall()
+        else:
+            rows = self.database.connection.execute(
+                "SELECT * FROM run_memory WHERE run_id = ? ORDER BY updated_at DESC",
+                (run_id,),
+            ).fetchall()
         entries: list[MemoryEntry] = []
         for row in rows:
             entries.append(

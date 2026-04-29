@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from textwrap import indent
-
 import yaml
 
 from ..models import ARTIFACT_SEQUENCE, ArtifactPointers, ArtifactSnapshot, ArtifactType, PsiRunState

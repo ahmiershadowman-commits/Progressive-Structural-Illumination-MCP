@@ -81,6 +81,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
             "debugging dead ends, or revision of prior conclusions, call psi.reflect before finalizing a plan, patch, or design."
         ),
         lifespan=lifespan,
+        streamable_http_path=settings.http_mount_path,
         stateless_http=True,
         json_response=True,
     )
@@ -629,7 +630,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
     def resource_run_summary(run_id: str) -> str:
         service = _read_only_service(settings)
         try:
-            return canonical_json(service.generate_summary(run_id))
+            return canonical_json(service.read_summary(run_id))
         finally:
             service.repository.database.close()
 

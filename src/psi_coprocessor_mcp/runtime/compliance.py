@@ -8,7 +8,6 @@ from ..models import (
     ComplianceIssue,
     ComplianceReport,
     DurabilityClass,
-    FrictionType,
     PsiRunState,
     TransitionDecision,
 )

@@ -17,7 +17,7 @@ from ..models import (
     Tension,
     TraceStep,
 )
-from ..utils import sha256_text, unique_preserve_order
+from ..utils import sha256_text
 from .analysis import AnalysisPayload
 
 
