@@ -601,7 +601,10 @@ class PsiService:
         durability_mode: str | None = None,
     ) -> PsiRunState:
         if run_id:
-            return self._hydrate_run_state(self.repository.get_run_state(run_id))
+            try:
+                return self._hydrate_run_state(self.repository.get_run_state(run_id))
+            except KeyError:
+                pass  # caller-supplied run_id not found; fall through and create a new run
         started = self.start_run(
             title=task[:80] or "PSI pass",
             scope=task,
@@ -1772,13 +1775,4 @@ class PsiService:
         }
 
     def generate_summary(self, run_id: str) -> dict[str, object]:
-        summary = self.repository.get_run_summary(run_id)
-        run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
-        self._refresh_control_state(run_state, phase_reason="summary", trigger="generate_summary")
-        compliance = self._evaluate_and_store_compliance(run_state, summary, action="summary")
-        return {
-            "run_id": run_id,
-            "summary": summary.model_dump(mode="json"),
-            "transition": run_state.state.transition.model_dump(mode="json"),
-            "compliance_report": compliance.model_dump(mode="json"),
-        }
+        summary = self.repo
