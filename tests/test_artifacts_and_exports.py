@@ -107,3 +107,31 @@ def test_export_import_round_trip(service, settings):
         assert any(entry.key == "export-note" for entry in imported_project_memory)
     finally:
         import_db.close()
+
+
+def test_export_run_path_traversal(service, settings):
+    import pytest
+
+    # Test with invalid characters that could be used for path traversal
+    invalid_run_ids = [
+        "run_id/with_slash",
+        "run_id\\with_backslash",
+        "../path_traversal",
+        "run_id with spaces",
+        "long_run_id_" * 10  # More than 64 characters
+    ]
+
+    result = service.reflect(
+        task="Test path traversal",
+        project_name="Traversal Project",
+    )
+    run_id = result["run_id"]
+
+    for invalid_id in invalid_run_ids:
+        with pytest.raises(ValueError) as excinfo:
+            service.export_run(invalid_id)
+        assert "Invalid run_id" in str(excinfo.value)
+
+    # Verify that the is_relative_to check exists as defense-in-depth
+    # by checking the source code logic with a valid run_id
+    service.export_run(run_id)  # Should succeed with valid run_id

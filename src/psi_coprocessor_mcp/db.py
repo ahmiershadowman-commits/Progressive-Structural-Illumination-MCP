@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from importlib import resources
@@ -11,6 +13,8 @@ from pathlib import Path
 from .config import ServerSettings
 from .seed import iter_seed_rows
 from .utils import compact_json, utc_now_iso
+
+logger = logging.getLogger("psi_coprocessor_mcp")
 
 MIGRATIONS = [
     "0001_core.sql",
@@ -29,6 +33,7 @@ def connect_database(path: Path) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode = WAL")
     connection.execute("PRAGMA synchronous = NORMAL")
     connection.execute("PRAGMA temp_store = MEMORY")
+    connection.execute("PRAGMA busy_timeout = 5000")
     return connection
 
 
@@ -114,15 +119,25 @@ class Database:
         self.connection = connect_database(self.settings.database_path)
         apply_migrations(self.connection)
         seed_builtin_memory(self.connection, settings)
+        self._lock = threading.RLock()
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        try:
-            yield self.connection
-            self.connection.commit()
-        except Exception:
-            self.connection.rollback()
-            raise
+        with self._lock:
+            try:
+                yield self.connection
+                self.connection.commit()
+            except Exception:
+                logger.exception("Database transaction failed, rolling back")
+                self.connection.rollback()
+                raise
+
+    def execute(self, sql: str, parameters: tuple[object, ...] | None = None) -> sqlite3.Cursor:
+        """Execute SQL with thread-safety lock."""
+        with self._lock:
+            if parameters is not None:
+                return self.connection.execute(sql, parameters)
+            return self.connection.execute(sql)
 
     def close(self) -> None:
         self.connection.close()

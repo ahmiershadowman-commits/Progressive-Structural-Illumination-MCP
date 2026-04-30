@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PSIModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_assignment=True, use_enum_values=False)
+    model_config = ConfigDict(extra="ignore", validate_assignment=True, use_enum_values=False)
 
 
 class RunMode(str, Enum):

@@ -83,3 +83,31 @@ def test_settings_expand_windows_style_env_paths(monkeypatch, tmp_path):
     assert settings.data_dir == local_app_data / "psi-coprocessor-mcp"
     assert settings.database_path == settings.data_dir / "psi.sqlite3"
     assert settings.export_dir == settings.data_dir / "exports"
+
+
+def test_parse_datetime_raises_on_null():
+    from psi_coprocessor_mcp.repository import _parse_datetime
+    import pytest
+
+    with pytest.raises(ValueError, match="Timestamp cannot be None or empty"):
+        _parse_datetime(None)
+
+    with pytest.raises(ValueError, match="Timestamp cannot be None or empty"):
+        _parse_datetime("")
+
+
+def test_parse_datetime_ensures_aware():
+    from psi_coprocessor_mcp.repository import _parse_datetime
+    from datetime import UTC
+
+    # Naive datetime should get UTC timezone
+    dt = _parse_datetime("2023-10-01T12:00:00")
+    assert dt.tzinfo is UTC
+
+    # Aware datetime should keep its timezone
+    dt = _parse_datetime("2023-10-01T12:00:00+05:00")
+    assert dt.tzinfo is not None
+    assert dt.utcoffset().total_seconds() == 18000
+
+
+

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 from typing import TypeVar, cast
 from uuid import uuid4
 
@@ -65,7 +66,12 @@ def _loads(value: str | None, fallback: T) -> T:
 
 
 def _parse_datetime(value: str | None) -> datetime:
-    return datetime.fromisoformat(value) if value else datetime.fromisoformat(utc_now_iso())
+    if not value:
+        raise ValueError("Timestamp cannot be None or empty")
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
 
 class Repository:
     def __init__(self, database: Database, skip_backfill: bool = False):
@@ -208,7 +214,7 @@ class Repository:
         return self.get_project_summary(project_id)
 
     def get_project_summary(self, project_id: str) -> ProjectSummary:
-        row = self.database.connection.execute(
+        row = self.database.execute(
             """
             SELECT
                 p.id,
@@ -749,7 +755,7 @@ class Repository:
         return run_state
 
     def get_run_state(self, run_id: str) -> PsiRunState:
-        row = self.database.connection.execute(
+        row = self.database.execute(
             "SELECT run_state_json FROM runs WHERE id = ?",
             (run_id,),
         ).fetchone()
@@ -758,7 +764,7 @@ class Repository:
         return PsiRunState.model_validate(_loads(row["run_state_json"], {}))
 
     def get_run_summary(self, run_id: str) -> SummaryBundle:
-        row = self.database.connection.execute(
+        row = self.database.execute(
             "SELECT summary_json FROM runs WHERE id = ?",
             (run_id,),
         ).fetchone()
@@ -809,7 +815,7 @@ class Repository:
         return payload
 
     def list_visibility_events(self, run_id: str) -> list[VisibilityEvent]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, event_type, title, description, source, severity, affected_entities_json,
                    evidence_json, metadata_json, created_at
@@ -891,7 +897,7 @@ class Repository:
         return payload
 
     def list_source_objects(self, run_id: str) -> list[SourceObject]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, source_kind, title, locator, version, content_hash, canonical,
                    metadata_json, created_at, updated_at
@@ -918,7 +924,7 @@ class Repository:
         ]
 
     def list_primitive_components(self, run_id: str) -> list[PrimitiveComponent]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, name, description, component_kind, scope, evidence_json, metadata_json, created_at, updated_at
             FROM primitive_components
@@ -943,7 +949,7 @@ class Repository:
         ]
 
     def list_state_variables(self, run_id: str) -> list[StateVariableRecord]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, name, description, variable_kind, scope, timescale, write_roles_json,
                    read_roles_json, evidence_json, metadata_json, created_at, updated_at
@@ -972,7 +978,7 @@ class Repository:
         ]
 
     def list_primitive_operators(self, run_id: str) -> list[PrimitiveOperatorRecord]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, name, family, object_ref, state_variable_ref, trigger_text, direct_action, target,
                    changes_json, cannot_do_json, where_text, when_text, directionality, timescale,
@@ -1011,7 +1017,7 @@ class Repository:
         ]
 
     def list_interlocks(self, run_id: str) -> list[InterlockRelation]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, relation_type, source_ref, target_ref, description, confidence, scope,
                    metadata_json, created_at, updated_at
@@ -1038,7 +1044,7 @@ class Repository:
         ]
 
     def list_trace_steps(self, run_id: str) -> list[TraceStep]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, cascade_id, step_index, branch_key, operator_ref, from_state, to_state,
                    trigger_text, outcome, divergence_class, blocking, evidence_json, metadata_json,
@@ -1071,7 +1077,7 @@ class Repository:
         ]
 
     def list_gap_records(self, run_id: str) -> list[GapRecord]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, title, gap_type, description, likely_origin, nearly_covers_json,
                    insufficient_because, dissolved_by_json, discriminator, blocking, status,
@@ -1104,7 +1110,7 @@ class Repository:
         ]
 
     def list_search_records(self, run_id: str) -> list[SearchRecord]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, query, target_object, rationale, status, findings_json, metadata_json, created_at, updated_at
             FROM search_records
@@ -1130,7 +1136,7 @@ class Repository:
         ]
 
     def list_basin_records(self, run_id: str) -> list[BasinRecord]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, title, basin_type, description, status, preserves_json, conflicts_json,
                    discriminator, metadata_json, created_at, updated_at
@@ -1161,7 +1167,7 @@ class Repository:
         ]
 
     def list_skeptic_findings(self, run_id: str) -> list[SkepticFinding]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, claim_ref, question, impact, severity, blocking, metadata_json, created_at, updated_at
             FROM skeptic_findings
@@ -1186,7 +1192,7 @@ class Repository:
         ]
 
     def list_antipattern_findings(self, run_id: str) -> list[AntiPatternFinding]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, pattern_type, description, evidence_json, severity, blocking, metadata_json, created_at, updated_at
             FROM antipattern_findings
@@ -1251,7 +1257,7 @@ class Repository:
         return payload
 
     def list_friction_logs(self, run_id: str) -> list[FrictionSignal]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, friction_type, severity, routing_regime, rationale, evidence_json, metadata_json, created_at
             FROM friction_logs
@@ -1342,7 +1348,7 @@ class Repository:
         return payload
 
     def list_anchors(self, project_id: str) -> list[Anchor]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, name, status, description, centrality, fragility, confidence,
                    durability_class, rationale, dependencies_json, implications_json, metadata_json,
@@ -1391,7 +1397,7 @@ class Repository:
         project_id: str | None = None,
         run_id: str | None = None,
     ) -> Anchor:
-        row = self.database.connection.execute(
+        row = self.database.execute(
             "SELECT * FROM anchors WHERE id = ?",
             (anchor_id,),
         ).fetchone()
@@ -1534,7 +1540,7 @@ class Repository:
         return payload
 
     def list_tensions(self, project_id: str) -> list[Tension]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, title, status, description, severity, forces_json, metadata_json, created_at, updated_at
             FROM tensions WHERE project_id = ? ORDER BY updated_at DESC
@@ -1622,7 +1628,7 @@ class Repository:
         return payload
 
     def list_hypotheses(self, project_id: str) -> list[PsiHypothesis]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, title, status, description, confidence, durability_class, preserves_json,
                    risks_json, discriminators_json, metadata_json, created_at, updated_at
@@ -1652,7 +1658,7 @@ class Repository:
         ]
 
     def list_typed_claims(self, run_id: str) -> list[TypedClaim]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, statement, provenance_tag, load_bearing, structural_role, confidence,
                    durability_class, confidence_axes_json, scaffold_json,
@@ -1688,7 +1694,7 @@ class Repository:
         ]
 
     def get_compliance_report(self, run_id: str) -> ComplianceReport | None:
-        row = self.database.connection.execute(
+        row = self.database.execute(
             """
             SELECT status, blocking, requested_action, issues_json, checked_artifacts_json, notes_json, checked_at
             FROM compliance_reports
@@ -1766,7 +1772,7 @@ class Repository:
         return payload
 
     def list_discriminators(self, project_id: str) -> list[Discriminator]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, title, description, target_json, best_next_probe, confidence_gain,
                    metadata_json, created_at, updated_at
@@ -1848,7 +1854,7 @@ class Repository:
         return payload
 
     def list_constraints(self, project_id: str) -> list[ConstraintItem]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, constraint_type, category, severity, description, source, timescale,
                    active, metadata_json, created_at, updated_at
@@ -1912,7 +1918,7 @@ class Repository:
         return payload
 
     def list_artifacts(self, run_id: str) -> list[ArtifactSnapshot]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, artifact_type, format, content, checksum, authoritative, created_at, updated_at
             FROM artifacts WHERE run_id = ? ORDER BY artifact_type
@@ -1995,7 +2001,7 @@ class Repository:
         }
 
     def list_sweeps(self, run_id: str) -> list[dict[str, object]]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, trigger_event_id, summary, impacted_entities_json, blast_radius_json,
                    deferred_entities_json, transition_json, metadata_json, created_at
@@ -2109,7 +2115,7 @@ class Repository:
         return payload
 
     def get_method_memory(self, key: str) -> MemoryEntry:
-        row = self.database.connection.execute(
+        row = self.database.execute(
             "SELECT * FROM method_memory WHERE memory_key = ?",
             (key,),
         ).fetchone()
@@ -2139,9 +2145,20 @@ class Repository:
         lane_filter = [*lane_values, "__psi_no_lane__", "__psi_no_lane__", "__psi_no_lane__", "__psi_no_lane__"][:4]
         parameters: list[object] = []
         if query.strip():
-            sanitized_query = " ".join(part for part in query.replace('"', " ").replace("'", " ").split() if part)
+            # Sanitize FTS5 query: strip special operators and wrap tokens in quotes for literal matching
+            tokens = query.replace('"', " ").replace("'", " ").split()
+            sanitized_tokens = []
+            for token in tokens:
+                # Strip FTS5 special characters
+                clean = re.sub(r'[*^()+\-]', '', token)
+                # Remove NEAR/OR/AND/NOT operators (case-insensitive)
+                clean = re.sub(r'\b(NEAR|OR|AND|NOT)\b', '', clean, flags=re.IGNORECASE)
+                clean = clean.strip()
+                if clean:
+                    sanitized_tokens.append(f'"{clean}"')
+            sanitized_query = " ".join(sanitized_tokens) if sanitized_tokens else ""
             parameters.extend([sanitized_query, *lane_filter, limit])
-            rows = self.database.connection.execute(
+            rows = self.database.execute(
                 """
                 SELECT rd.lane, rd.document_type, rd.ref_id, rd.title, rd.content, rd.tags_json,
                        rd.metadata_json, bm25(retrieval_documents_fts) AS score
@@ -2156,7 +2173,7 @@ class Repository:
             ).fetchall()
         else:
             parameters.extend([*lane_filter, limit])
-            rows = self.database.connection.execute(
+            rows = self.database.execute(
                 """
                 SELECT lane, document_type, ref_id, title, content, tags_json, metadata_json, 0.0 AS score
                 FROM retrieval_documents
@@ -2187,16 +2204,16 @@ class Repository:
         run_id: str | None = None,
     ) -> list[MemoryEntry]:
         if lane == MemoryLane.METHOD:
-            rows = self.database.connection.execute("SELECT * FROM method_memory ORDER BY updated_at DESC").fetchall()
+            rows = self.database.execute("SELECT * FROM method_memory ORDER BY updated_at DESC").fetchall()
         elif lane == MemoryLane.STABLE_USER:
-            rows = self.database.connection.execute("SELECT * FROM user_memory ORDER BY updated_at DESC").fetchall()
+            rows = self.database.execute("SELECT * FROM user_memory ORDER BY updated_at DESC").fetchall()
         elif lane == MemoryLane.PROJECT:
-            rows = self.database.connection.execute(
+            rows = self.database.execute(
                 "SELECT * FROM project_memory WHERE project_id = ? ORDER BY updated_at DESC",
                 (project_id,),
             ).fetchall()
         else:
-            rows = self.database.connection.execute(
+            rows = self.database.execute(
                 "SELECT * FROM run_memory WHERE run_id = ? ORDER BY updated_at DESC",
                 (run_id,),
             ).fetchall()
@@ -2332,7 +2349,7 @@ class Repository:
         }
 
     def list_supersession_history(self, run_id: str) -> list[dict[str, object]]:
-        rows = self.database.connection.execute(
+        rows = self.database.execute(
             """
             SELECT id, entity_type, entity_id, superseded_by, reason, metadata_json, created_at
             FROM supersession_history

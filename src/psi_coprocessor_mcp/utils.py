@@ -21,11 +21,11 @@ def utc_now_iso() -> str:
 
 
 def canonical_json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True)
+    return json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True, default=str)
 
 
 def compact_json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def sha256_text(text: str) -> str:

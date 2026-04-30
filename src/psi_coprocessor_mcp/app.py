@@ -4,19 +4,66 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from starlette.applications import Starlette
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 from starlette.routing import Mount
 
 from .config import ServerSettings
+
+
+class OriginValidationMiddleware(BaseHTTPMiddleware):
+    """Validate Origin header to prevent DNS rebinding attacks."""
+
+    ALLOWED_ORIGINS = {"localhost", "127.0.0.1", "[::1]"}
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin")
+        if origin:
+            # Parse origin: scheme://host[:port]
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(origin)
+                host = parsed.hostname or ""
+                if host not in self.ALLOWED_ORIGINS:
+                    logger.warning("Rejected request from unauthorized origin: %s", origin)
+                    return JSONResponse(
+                        {"error": "Unauthorized origin"},
+                        status_code=403,
+                    )
+            except Exception:
+                logger.warning("Invalid origin header: %s", origin)
+                return JSONResponse(
+                    {"error": "Invalid origin header"},
+                    status_code=400,
+                )
+        return await call_next(request)
 from .db import Database
 from .repository import Repository
 from .service import PsiService
 from .utils import canonical_json
+
+logger = logging.getLogger("psi_coprocessor_mcp")
+
+# Cache for read-only service to avoid reopening database on every resource read
+_read_only_service_cache: dict[str, PsiService] = {}
+
+
+def _get_read_only_service(settings: ServerSettings) -> PsiService:
+    """Get or create a cached read-only service for the given settings."""
+    cache_key = str(settings.database_path)
+    if cache_key not in _read_only_service_cache:
+        database = Database(settings)
+        repository = Repository(database, skip_backfill=True)
+        _read_only_service_cache[cache_key] = PsiService(repository, settings)
+    return _read_only_service_cache[cache_key]
 
 
 @dataclass(slots=True)
@@ -37,6 +84,7 @@ def _parse_metadata(raw: str) -> dict[str, object]:
     try:
         loaded = json.loads(raw)
     except json.JSONDecodeError as exc:
+        logger.warning("Invalid metadata_json: %s", exc)
         raise ToolError(f"Invalid metadata_json: {exc}") from exc
     if not isinstance(loaded, dict):
         raise ToolError("metadata_json must decode to an object")
@@ -55,10 +103,15 @@ def _block_on_durability(output: dict[str, object], block_on_poison: bool) -> No
         )
 
 
-def _read_only_service(settings: ServerSettings) -> PsiService:
-    database = Database(settings)
-    repository = Repository(database, skip_backfill=True)
-    return PsiService(repository, settings)
+def _call_service(service_call: callable) -> object:
+    try:
+        return service_call()
+    except KeyError as exc:
+        logger.warning("Service call failed: %s", exc)
+        raise ToolError(str(exc)) from exc
+    except ValueError as exc:
+        logger.warning("Service call blocked or invalid: %s", exc)
+        raise ToolError(str(exc)) from exc
 
 
 def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
@@ -137,7 +190,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
 
     @mcp.tool(name="psi.run.get_state", description="Return current live PSI run-state in compact and full forms.")
     def psi_run_get_state(ctx: Context, run_id: str) -> dict[str, object]:
-        return _ctx_service(ctx).get_run_state(run_id)
+        return _call_service(lambda: _ctx_service(ctx).get_run_state(run_id))
 
     @mcp.tool(name="psi.event.record", description="Record a visibility event explicitly.")
     def psi_event_record(
@@ -167,7 +220,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
         run_id: str = "",
         project_id: str = "",
     ) -> dict[str, object]:
-        return _ctx_service(ctx).friction_type(text=text, run_id=run_id or None, project_id=project_id or None)
+        return _call_service(lambda: _ctx_service(ctx).friction_type(text=text, run_id=run_id or None, project_id=project_id or None))
 
     @mcp.tool(name="psi.sweep.run", description="Run a weighted coherence sweep with blast-radius estimation.")
     def psi_sweep_run(
@@ -176,11 +229,11 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
         changed_text: str = "",
         trigger_event_id: str = "",
     ) -> dict[str, object]:
-        return _ctx_service(ctx).run_sweep(
+        return _call_service(lambda: _ctx_service(ctx).run_sweep(
             run_id=run_id,
             changed_text=changed_text,
             trigger_event_id=trigger_event_id or None,
-        )
+        ))
 
     @mcp.tool(name="psi.anchor.register", description="Register a durable anchor, including weakening conditions and any bounded temporary scaffold semantics.")
     def psi_anchor_register(
@@ -341,19 +394,19 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
 
     @mcp.tool(name="psi.compliance.check", description="Run the PSI pre-emission compliance checker against the current run-state.")
     def psi_compliance_check(ctx: Context, run_id: str, action: str = "summary") -> dict[str, object]:
-        return _ctx_service(ctx).check_compliance(run_id=run_id, action=action)
+        return _call_service(lambda: _ctx_service(ctx).check_compliance(run_id=run_id, action=action))
 
     @mcp.tool(name="psi.artifacts.sync", description="Regenerate artifacts from live run-state and ensure sync.")
     def psi_artifacts_sync(ctx: Context, run_id: str) -> dict[str, object]:
-        return _ctx_service(ctx).sync_artifacts(run_id)
+        return _call_service(lambda: _ctx_service(ctx).sync_artifacts(run_id))
 
     @mcp.tool(name="psi.export.run", description="Export the full run package.")
     def psi_export_run(ctx: Context, run_id: str, export_format: str = "both") -> dict[str, object]:
-        return _ctx_service(ctx).export_run(run_id=run_id, export_format=export_format)
+        return _call_service(lambda: _ctx_service(ctx).export_run(run_id=run_id, export_format=export_format))
 
     @mcp.tool(name="psi.import.run", description="Import or reload a previously exported run package.")
     def psi_import_run(ctx: Context, import_path: str) -> dict[str, object]:
-        return _ctx_service(ctx).import_run(import_path)
+        return _call_service(lambda: _ctx_service(ctx).import_run(import_path))
 
     @mcp.tool(name="psi.diff.analyze", description="Analyze a diff for local patch drift, durability risk, and field impact.")
     def psi_diff_analyze(
@@ -438,201 +491,132 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
     def psi_stress_run(ctx: Context, run_id: str, action: str = "summary") -> dict[str, object]:
         return _ctx_service(ctx).stress_run(run_id, action=action)
 
-    @mcp.resource("psi://method/current", name="psi://method/current", mime_type="text/plain")
+    @mcp.resource("psi://method/current", name="psi://method/current", mime_type="text/markdown")
     def resource_method_current() -> str:
-        service = _read_only_service(settings)
-        try:
-            return service.repository.get_method_memory("current").content
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return service.repository.get_method_memory("current").content
 
-    @mcp.resource("psi://method/question-operators", name="psi://method/question-operators", mime_type="text/plain")
+    @mcp.resource("psi://method/question-operators", name="psi://method/question-operators", mime_type="text/markdown")
     def resource_method_question_operators() -> str:
-        service = _read_only_service(settings)
-        try:
-            return service.repository.get_method_memory("question-operators").content
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return service.repository.get_method_memory("question-operators").content
 
-    @mcp.resource("psi://method/ai-contract", name="psi://method/ai-contract", mime_type="text/plain")
+    @mcp.resource("psi://method/ai-contract", name="psi://method/ai-contract", mime_type="text/markdown")
     def resource_method_ai_contract() -> str:
-        service = _read_only_service(settings)
-        try:
-            return service.repository.get_method_memory("ai-contract").content
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return service.repository.get_method_memory("ai-contract").content
 
-    @mcp.resource("psi://method/normalization-map", name="psi://method/normalization-map", mime_type="text/plain")
+    @mcp.resource("psi://method/normalization-map", name="psi://method/normalization-map", mime_type="text/markdown")
     def resource_method_normalization_map() -> str:
-        service = _read_only_service(settings)
-        try:
-            return service.repository.get_method_memory("normalization-map").content
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return service.repository.get_method_memory("normalization-map").content
 
     @mcp.resource("psi://method/control-families", name="psi://method/control-families", mime_type="application/json")
     def resource_method_control_families() -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.explain_regime()["control_families"])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.explain_regime()["control_families"])
 
     @mcp.resource("psi://method/mode-profiles", name="psi://method/mode-profiles", mime_type="application/json")
     def resource_method_mode_profiles() -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.explain_regime()["mode_profiles"])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.explain_regime()["mode_profiles"])
 
     @mcp.resource("psi://project/{project_id}/summary", mime_type="application/json")
     def resource_project_summary(project_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.repository.get_project_summary(project_id).model_dump(mode="json"))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.repository.get_project_summary(project_id).model_dump(mode="json"))
 
     @mcp.resource("psi://project/{project_id}/anchors", mime_type="application/json")
     def resource_project_anchors(project_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json([anchor.model_dump(mode="json") for anchor in service.repository.list_anchors(project_id)])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json([anchor.model_dump(mode="json") for anchor in service.repository.list_anchors(project_id)])
 
     @mcp.resource("psi://project/{project_id}/tensions", mime_type="application/json")
     def resource_project_tensions(project_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json([tension.model_dump(mode="json") for tension in service.repository.list_tensions(project_id)])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json([tension.model_dump(mode="json") for tension in service.repository.list_tensions(project_id)])
 
     @mcp.resource("psi://project/{project_id}/constraints", mime_type="application/json")
     def resource_project_constraints(project_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json([constraint.model_dump(mode="json") for constraint in service.repository.list_constraints(project_id)])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json([constraint.model_dump(mode="json") for constraint in service.repository.list_constraints(project_id)])
 
     @mcp.resource("psi://run/{run_id}/state", mime_type="application/json")
     def resource_run_state(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.get_run_state(run_id))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.get_run_state(run_id))
 
     @mcp.resource("psi://run/{run_id}/sources", mime_type="application/json")
     def resource_run_sources(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.source_audit(run_id))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.source_audit(run_id))
 
     @mcp.resource("psi://run/{run_id}/components", mime_type="application/json")
     def resource_run_components(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.structure_extract(run_id))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.structure_extract(run_id))
 
     @mcp.resource("psi://run/{run_id}/interlocks", mime_type="application/json")
     def resource_run_interlocks(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.structure_extract(run_id)["interlocks"])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.structure_extract(run_id)["interlocks"])
 
     @mcp.resource("psi://run/{run_id}/traces", mime_type="application/json")
     def resource_run_traces(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.trace_run(run_id))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.trace_run(run_id))
 
     @mcp.resource("psi://run/{run_id}/gaps", mime_type="application/json")
     def resource_run_gaps(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.gap_analyze(run_id))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.gap_analyze(run_id))
 
     @mcp.resource("psi://run/{run_id}/stress", mime_type="application/json")
     def resource_run_stress(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.stress_run(run_id, action="summary"))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.stress_run(run_id, action="summary"))
 
     @mcp.resource("psi://run/{run_id}/events", mime_type="application/json")
     def resource_run_events(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json([event.model_dump(mode="json") for event in service.repository.list_visibility_events(run_id)])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json([event.model_dump(mode="json") for event in service.repository.list_visibility_events(run_id)])
 
     @mcp.resource("psi://run/{run_id}/sweeps", mime_type="application/json")
     def resource_run_sweeps(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.repository.list_sweeps(run_id))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.repository.list_sweeps(run_id))
 
     @mcp.resource("psi://run/{run_id}/artifacts", mime_type="application/json")
     def resource_run_artifacts(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            artifacts = service.repository.list_artifacts(run_id)
-            return canonical_json(
-                [
-                    {
-                        "artifact_type": artifact.artifact_type.value,
-                        "checksum": artifact.checksum,
-                        "format": artifact.format,
-                        "authoritative": artifact.authoritative,
-                    }
-                    for artifact in artifacts
-                ]
-            )
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        artifacts = service.repository.list_artifacts(run_id)
+        return canonical_json(
+            [
+                {
+                    "artifact_type": artifact.artifact_type.value,
+                    "checksum": artifact.checksum,
+                    "format": artifact.format,
+                    "authoritative": artifact.authoritative,
+                }
+                for artifact in artifacts
+            ]
+        )
 
     @mcp.resource("psi://run/{run_id}/claims", mime_type="application/json")
     def resource_run_claims(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json([claim.model_dump(mode="json") for claim in service.repository.list_typed_claims(run_id)])
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json([claim.model_dump(mode="json") for claim in service.repository.list_typed_claims(run_id)])
 
     @mcp.resource("psi://run/{run_id}/compliance", mime_type="application/json")
     def resource_run_compliance(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            report = service.repository.get_compliance_report(run_id)
-            return canonical_json(report.model_dump(mode="json") if report else {})
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        report = service.repository.get_compliance_report(run_id)
+        return canonical_json(report.model_dump(mode="json") if report else {})
 
     @mcp.resource("psi://run/{run_id}/summary", mime_type="application/json")
     def resource_run_summary(run_id: str) -> str:
-        service = _read_only_service(settings)
-        try:
-            return canonical_json(service.read_summary(run_id))
-        finally:
-            service.repository.database.close()
+        service = _get_read_only_service(settings)
+        return canonical_json(service.read_summary(run_id))
 
     @mcp.prompt(name="start_psi_pass", description="Start a PSI-guided pass for a new task.")
     def prompt_start_psi_pass(task: str, mode: str = "construction", project_id: str = "") -> str:
@@ -705,4 +689,6 @@ def create_http_app(settings: ServerSettings | None = None) -> Starlette:
             await stack.enter_async_context(mcp.session_manager.run())
             yield
 
-    return Starlette(routes=[Mount("/", mcp.streamable_http_app())], lifespan=lifespan)
+    app = Starlette(routes=[Mount("/", mcp.streamable_http_app())], lifespan=lifespan)
+    app.add_middleware(OriginValidationMiddleware)
+    return app

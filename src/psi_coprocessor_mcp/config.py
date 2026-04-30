@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("psi_coprocessor_mcp")
 
 
 def _expand_path(value: str | os.PathLike[str]) -> Path:
@@ -12,9 +15,10 @@ def _expand_path(value: str | os.PathLike[str]) -> Path:
 
 
 def _default_data_dir() -> Path:
-    local_app_data = os.getenv("LOCALAPPDATA")
-    if local_app_data:
-        return _expand_path(local_app_data) / "psi-coprocessor-mcp"
+    if os.name == "nt":
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            return _expand_path(local_app_data) / "psi-coprocessor-mcp"
     return Path.home() / ".psi-coprocessor-mcp"
 
 
@@ -55,6 +59,7 @@ class ServerSettings:
         try:
             http_port = int(_raw_port)
         except ValueError as exc:
+            logger.error("Invalid PSI_MCP_HTTP_PORT: %s", _raw_port)
             raise ValueError(
                 f"PSI_MCP_HTTP_PORT must be an integer; got {_raw_port!r}"
             ) from exc

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -45,6 +48,8 @@ from .models import (
 )
 from .models import Hypothesis as PsiHypothesis
 from .repository import Repository
+
+logger = logging.getLogger("psi_coprocessor_mcp")
 from .runtime.analysis import (
     AnalysisPayload,
     assess_applicability,
@@ -130,6 +135,12 @@ class PsiService:
         )
 
     def _hydrate_run_state(self, run_state: PsiRunState) -> PsiRunState:
+        """Hydrate a run state with fresh data from the repository.
+
+        NOTE: This mutates the passed run_state in place. This is intentional
+        design — the codebase relies on this pattern for state consistency.
+        Callers should ensure they own the run_state object before calling.
+        """
         project_id = run_state.metadata.project_id
         if project_id:
             run_state.state.A = self.repository.list_anchors(project_id)
@@ -260,6 +271,15 @@ class PsiService:
         )
         self._refresh_methodology_objects(run_state, payload, run_state.state.F)
         self._audit_sources(run_state)
+
+    def _gate(self, run_state: PsiRunState, action: str = "mutation") -> None:
+        """Check if compliance is blocking and raise if so."""
+        if run_state.metadata.durability_mode == DurabilityMode.BLOCKING:
+            compliance = run_state.state.compliance
+            if compliance and compliance.blocking:
+                raise ValueError(
+                    f"PSI compliance blocked {action} because stable emission requirements are not satisfied."
+                )
 
     def _evaluate_and_store_compliance(
         self,
@@ -527,7 +547,7 @@ class PsiService:
             try:
                 run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
             except KeyError:
-                pass
+                logger.warning("Run %s not found, creating new run", run_id)
             else:
                 self._refresh_control_state(run_state)
                 return {
@@ -602,9 +622,13 @@ class PsiService:
     ) -> PsiRunState:
         if run_id:
             try:
-                return self._hydrate_run_state(self.repository.get_run_state(run_id))
+                run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+                logger.debug("Resumed existing run %s", run_id)
+                return run_state
             except KeyError:
-                pass  # caller-supplied run_id not found; fall through and create a new run
+                logger.warning(
+                    "Run %s not found; creating new run with explicit run_id", run_id
+                )
         started = self.start_run(
             title=task[:80] or "PSI pass",
             scope=task,
@@ -617,8 +641,11 @@ class PsiService:
         return self._hydrate_run_state(self.repository.get_run_state(started["run_id"]))
 
     def get_run_state(self, run_id: str) -> dict[str, object]:
-        run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
-        summary = self.repository.get_run_summary(run_id)
+        try:
+            run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+            summary = self.repository.get_run_summary(run_id)
+        except KeyError as exc:
+            raise KeyError(f"Unknown run_id: {run_id}") from exc
         self._refresh_control_state(run_state)
         compact = {
             "run_id": run_state.metadata.run_id,
@@ -866,6 +893,7 @@ class PsiService:
         evidence: list[str] | None = None,
     ) -> dict[str, object]:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+        self._gate(run_state, action="record_event")
         event = VisibilityEvent(
             type=VisibilityEventType(event_type),
             title=title,
@@ -889,6 +917,7 @@ class PsiService:
         frictions = type_friction(payload)
         if run_id:
             run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+            self._gate(run_state, action="friction_type")
             run_state.state.F = frictions
             self._apply_runtime_control_surface(
                 run_state=run_state,
@@ -923,6 +952,7 @@ class PsiService:
         trigger_event_id: str | None = None,
     ) -> dict[str, object]:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+        self._gate(run_state, action="run_sweep")
         if trigger_event_id:
             event = next(
                 (event for event in self.repository.list_visibility_events(run_id) if event.id == trigger_event_id),
@@ -1177,6 +1207,7 @@ class PsiService:
         rationale: str = "",
     ) -> dict[str, object]:
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
+        self._gate(run_state, action="set_transition")
         if decision is None:
             transition = recommend_transition(
                 frictions=run_state.state.F,
@@ -1344,6 +1375,7 @@ class PsiService:
     def sync_artifacts(self, run_id: str) -> dict[str, object]:
         context = self.repository.collect_run_context(run_id)
         run_state: PsiRunState = self._hydrate_run_state(context["run_state"])
+        self._gate(run_state, action="sync_artifacts")
         self._ensure_authoritative_structures(run_state, context["summary"])
         self._audit_sources(run_state)
         context["run_state"] = run_state
@@ -1415,6 +1447,19 @@ class PsiService:
         }
 
     def export_run(self, run_id: str, export_format: str = "both") -> dict[str, object]:
+        # Validate run_id to prevent path traversal
+        if not re.fullmatch(r"^[A-Za-z0-9_.-]{1,64}$", run_id):
+            raise ValueError(
+                f"Invalid run_id: '{run_id}'. Must match pattern ^[A-Za-z0-9_.-]{{1,64}}$"
+            )
+
+        timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
+        export_root = ensure_directory(self.settings.export_dir / f"{run_id}-{timestamp}")
+
+        # Assert that export_root is a child of export_dir
+        if not export_root.resolve().is_relative_to(self.settings.export_dir.resolve()):
+            raise ValueError("Export path is not relative to the configured export directory.")
+
         self.sync_artifacts(run_id)
         compliance = self.check_compliance(run_id, action="export")
         run_state = self._hydrate_run_state(self.repository.get_run_state(run_id))
@@ -1439,8 +1484,6 @@ class PsiService:
         context["basins"] = run_state.state.basins
         context["skeptic_findings"] = run_state.state.skeptic_findings
         context["antipattern_findings"] = run_state.state.antipattern_findings
-        timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
-        export_root = ensure_directory(self.settings.export_dir / f"{run_id}-{timestamp}")
         artifacts_dir = ensure_directory(export_root / "artifacts")
         bundle = {
             "run_state": run_state.model_dump(mode="json"),
@@ -1522,116 +1565,164 @@ class PsiService:
         }
 
     def import_run(self, import_path: str) -> dict[str, object]:
+        MAX_IMPORT_SIZE = 100 * 1024 * 1024  # 100MB
+        
         path = Path(import_path)
+        
+        # Reject symlinks
+        if path.is_symlink() or any(part.is_symlink() for part in path.parents if part != Path(".")):
+            raise ValueError("Import path cannot be a symlink")
+        
         if path.is_dir():
             bundle_path = path / "bundle.json"
             if not bundle_path.exists():
                 bundle_path = path / "bundle.yaml"
         else:
             bundle_path = path
+        
+        if not bundle_path.exists():
+            raise ValueError(f"Import bundle not found: {bundle_path}")
+        
+        # Check file size
+        file_size = bundle_path.stat().st_size
+        if file_size > MAX_IMPORT_SIZE:
+            raise ValueError(f"Import bundle too large: {file_size} bytes (max {MAX_IMPORT_SIZE})")
+        
+        raw_content = bundle_path.read_text(encoding="utf-8")
+        
         if bundle_path.suffix.lower() == ".json":
-            payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+            payload = json.loads(raw_content)
         else:
-            payload = yaml.safe_load(bundle_path.read_text(encoding="utf-8"))
-        run_state = PsiRunState.model_validate(payload["run_state"])
+            payload = yaml.safe_load(raw_content)
+        
+        if payload is None:
+            raise ValueError("Import bundle is empty or invalid")
+        
+        if not isinstance(payload, dict):
+            raise ValueError("Import bundle must be an object")
+        
+        # Check manifest schema version if present
+        manifest = payload.get("manifest", {})
+        if manifest and manifest.get("schema_version", "1.2.0") != "1.2.0":
+            raise ValueError(f"Unsupported bundle schema version: {manifest.get('schema_version')}")
+        
+        # Validate required keys
+        if "run_state" not in payload:
+            raise ValueError("Import bundle missing required field: run_state")
+        if "summary" not in payload:
+            raise ValueError("Import bundle missing required field: summary")
+        
+        # Validate run_id format
+        run_state_data = payload["run_state"]
+        if not isinstance(run_state_data, dict):
+            raise ValueError("run_state must be an object")
+        run_id = run_state_data.get("metadata", {}).get("run_id", "")
+        if run_id and not re.fullmatch(r"^[A-Za-z0-9_.-]{1,64}$", run_id):
+            raise ValueError(f"Invalid run_id in bundle: {run_id}")
+        
+        run_state = PsiRunState.model_validate(run_state_data)
         summary = SummaryBundle.model_validate(payload["summary"])
-        if run_state.metadata.project_id:
-            project_summary = payload.get("project_summary") or {}
-            self.repository.ensure_project(
-                project_id=run_state.metadata.project_id,
-                name=project_summary.get("name", run_state.metadata.project_id),
-                scope_summary=project_summary.get(
-                    "scope_summary",
-                    "; ".join(run_state.state.B.included),
-                ),
-                metadata={"imported": True},
-            )
-        self._refresh_control_state(run_state, phase_reason="import", trigger="import_run")
-        self.repository.save_run(run_state, summary)
-        for event_payload in payload.get("events", []):
-            self.repository.record_visibility_event(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                VisibilityEvent.model_validate(event_payload),
-            )
-        for friction_payload in payload.get("friction_logs", []):
-            self.repository.record_friction(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                FrictionSignal.model_validate(friction_payload),
-            )
-        for sweep_payload in payload.get("sweeps", []):
-            self.repository.record_sweep(
-                project_id=run_state.metadata.project_id,
-                run_id=run_state.metadata.run_id,
-                trigger_event_id=sweep_payload.get("trigger_event_id"),
-                summary=sweep_payload.get("summary", ""),
-                impacted_entities=sweep_payload.get("impacted_entities", []),
-                blast_radius=[BlastRadiusImpact.model_validate(item) for item in sweep_payload.get("blast_radius", [])],
-                deferred_entities=sweep_payload.get("deferred_entities", []),
-                transition=sweep_payload.get("transition", {}),
-                metadata=sweep_payload.get("metadata", {}),
-                sweep_id=sweep_payload.get("id"),
-                created_at=sweep_payload.get("created_at"),
-            )
-        for anchor_payload in payload.get("anchors", []):
-            self.repository.upsert_anchor(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                Anchor.model_validate(anchor_payload),
-            )
-        for tension_payload in payload.get("tensions", []):
-            self.repository.upsert_tension(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                Tension.model_validate(tension_payload),
-            )
-        for hypothesis_payload in payload.get("hypotheses", []):
-            self.repository.upsert_hypothesis(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                PsiHypothesis.model_validate(hypothesis_payload),
-            )
-        for discriminator_payload in payload.get("discriminators", []):
-            self.repository.upsert_discriminator(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                Discriminator.model_validate(discriminator_payload),
-            )
-        for constraint_payload in payload.get("constraints", []):
-            self.repository.upsert_constraint(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                ConstraintItem.model_validate(constraint_payload),
-            )
-        for source_payload in payload.get("source_objects", []):
-            self.repository.upsert_source_object(
-                run_state.metadata.project_id,
-                run_state.metadata.run_id,
-                SourceObject.model_validate(source_payload),
-            )
-        for supersession_payload in payload.get("supersession_history", []):
-            self.repository.record_supersession_history_item(
-                project_id=run_state.metadata.project_id,
-                run_id=run_state.metadata.run_id,
-                entity_type=supersession_payload.get("entity_type", ""),
-                entity_id=supersession_payload.get("entity_id", ""),
-                superseded_by=supersession_payload.get("superseded_by", ""),
-                reason=supersession_payload.get("reason", ""),
-                metadata=supersession_payload.get("metadata", {}),
-                history_id=supersession_payload.get("id"),
-                created_at=supersession_payload.get("created_at"),
-            )
-        for memory_payload in payload.get("project_memory", []):
-            self.repository.upsert_memory(MemoryEntry.model_validate(memory_payload))
-        for memory_payload in payload.get("run_memory", []):
-            self.repository.upsert_memory(MemoryEntry.model_validate(memory_payload))
-        for artifact_payload in payload.get("artifacts", []):
-            from .models import ArtifactSnapshot
-
-            self.repository.save_artifact(run_state.metadata.run_id, ArtifactSnapshot.model_validate(artifact_payload))
-        final_state = self._hydrate_run_state(run_state)
-        self.repository.save_run(final_state, summary)
+        
+        # Wrap import in transaction
+        with self.repository.database.transaction():
+            if run_state.metadata.project_id:
+                project_summary = payload.get("project_summary") or {}
+                self.repository.ensure_project(
+                    project_id=run_state.metadata.project_id,
+                    name=project_summary.get("name", run_state.metadata.project_id),
+                    scope_summary=project_summary.get(
+                        "scope_summary",
+                        "; ".join(run_state.state.B.included),
+                    ),
+                    metadata={"imported": True},
+                )
+            self._refresh_control_state(run_state, phase_reason="import", trigger="import_run")
+            self.repository.save_run(run_state, summary)
+            for event_payload in payload.get("events", []):
+                self.repository.record_visibility_event(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    VisibilityEvent.model_validate(event_payload),
+                )
+            for friction_payload in payload.get("friction_logs", []):
+                self.repository.record_friction(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    FrictionSignal.model_validate(friction_payload),
+                )
+            for sweep_payload in payload.get("sweeps", []):
+                self.repository.record_sweep(
+                    project_id=run_state.metadata.project_id,
+                    run_id=run_state.metadata.run_id,
+                    trigger_event_id=sweep_payload.get("trigger_event_id"),
+                    summary=sweep_payload.get("summary", ""),
+                    impacted_entities=sweep_payload.get("impacted_entities", []),
+                    blast_radius=[BlastRadiusImpact.model_validate(item) for item in sweep_payload.get("blast_radius", [])],
+                    deferred_entities=sweep_payload.get("deferred_entities", []),
+                    transition=sweep_payload.get("transition", {}),
+                    metadata=sweep_payload.get("metadata", {}),
+                    sweep_id=sweep_payload.get("id"),
+                    created_at=sweep_payload.get("created_at"),
+                )
+            for anchor_payload in payload.get("anchors", []):
+                self.repository.upsert_anchor(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    Anchor.model_validate(anchor_payload),
+                )
+            for tension_payload in payload.get("tensions", []):
+                self.repository.upsert_tension(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    Tension.model_validate(tension_payload),
+                )
+            for hypothesis_payload in payload.get("hypotheses", []):
+                self.repository.upsert_hypothesis(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    PsiHypothesis.model_validate(hypothesis_payload),
+                )
+            for discriminator_payload in payload.get("discriminators", []):
+                self.repository.upsert_discriminator(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    Discriminator.model_validate(discriminator_payload),
+                )
+            for constraint_payload in payload.get("constraints", []):
+                self.repository.upsert_constraint(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    ConstraintItem.model_validate(constraint_payload),
+                )
+            for source_payload in payload.get("source_objects", []):
+                self.repository.upsert_source_object(
+                    run_state.metadata.project_id,
+                    run_state.metadata.run_id,
+                    SourceObject.model_validate(source_payload),
+                )
+            for supersession_payload in payload.get("supersession_history", []):
+                self.repository.record_supersession_history_item(
+                    project_id=run_state.metadata.project_id,
+                    run_id=run_state.metadata.run_id,
+                    entity_type=supersession_payload.get("entity_type", ""),
+                    entity_id=supersession_payload.get("entity_id", ""),
+                    superseded_by=supersession_payload.get("superseded_by", ""),
+                    reason=supersession_payload.get("reason", ""),
+                    metadata=supersession_payload.get("metadata", {}),
+                    history_id=supersession_payload.get("id"),
+                    created_at=supersession_payload.get("created_at"),
+                )
+            for memory_payload in payload.get("project_memory", []):
+                self.repository.upsert_memory(MemoryEntry.model_validate(memory_payload))
+            for memory_payload in payload.get("run_memory", []):
+                self.repository.upsert_memory(MemoryEntry.model_validate(memory_payload))
+            for artifact_payload in payload.get("artifacts", []):
+                from .models import ArtifactSnapshot
+                
+                self.repository.save_artifact(run_state.metadata.run_id, ArtifactSnapshot.model_validate(artifact_payload))
+            final_state = self._hydrate_run_state(run_state)
+            self.repository.save_run(final_state, summary)
+        
         return {
             "run_id": run_state.metadata.run_id,
             "project_id": run_state.metadata.project_id,
