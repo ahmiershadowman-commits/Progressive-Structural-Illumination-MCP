@@ -85,6 +85,39 @@ def test_settings_expand_windows_style_env_paths(monkeypatch, tmp_path):
     assert settings.export_dir == settings.data_dir / "exports"
 
 
+def test_fts_sanitizes_special_characters(service):
+    """FTS5 metacharacters and all-operator queries must not raise OperationalError."""
+    started = service.start_run(title="FTS Test", scope="Verify FTS sanitization", project_name="FTS Project")
+    service.commit_memory(
+        lane="project",
+        key="fts-test",
+        title="blast radius analysis",
+        content="The blast radius of this change is contained to the service layer.",
+        project_id=started["project_id"],
+    )
+    # These should all succeed without raising sqlite3.OperationalError
+    for query in [
+        "blast*",           # bare wildcard
+        "OR AND NOT",       # all operators — post-sanitization yields empty, falls back to recency
+        "***",              # all special chars
+        "blast AND radius", # explicit AND operator
+        "NEAR(blast)",      # NEAR with parens
+        "blast-radius",     # hyphen
+        '"blast"',          # double-quoted token
+        "blast+radius",     # plus operator
+    ]:
+        result = service.retrieve_memory(query=query, lanes=["project"])
+        assert "hits" in result
+
+
+def test_retrieve_memory_limit_is_clamped(service):
+    """Caller-supplied limit must be clamped to [1, 500]."""
+    result_high = service.retrieve_memory(query="anything", limit=9999999)
+    result_low = service.retrieve_memory(query="anything", limit=-5)
+    assert "hits" in result_high
+    assert "hits" in result_low
+
+
 def test_parse_datetime_raises_on_null():
     from psi_coprocessor_mcp.repository import _parse_datetime
     import pytest

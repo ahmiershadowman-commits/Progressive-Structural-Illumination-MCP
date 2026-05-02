@@ -18,7 +18,11 @@ It ships as a typed Python package with:
 
 ## Quick Start
 
-**No clone needed.** Add this to your `claude_desktop_config.json` (or equivalent MCP host config):
+**No clone needed.** Requires [`uv`](https://docs.astral.sh/uv/getting-started/installation/) (free, one-time install).
+
+**Claude Desktop / Cursor / Windsurf / LM Studio / Jan AI / OpenCode / Codex / Gemini CLI** — see [full installation guide](docs/installation.md) for step-by-step instructions per client.
+
+**Claude Desktop (quick version):** add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -42,15 +46,13 @@ Or run directly:
 uvx --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp stdio
 ```
 
-For streamable HTTP:
+For HTTP (multi-client or Open WebUI):
 
 ```sh
 uvx --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp http --port 8765
 ```
 
-Recommended host routing instruction:
-
-> When a task involves ambiguity, hidden dependencies, contradiction, scope drift, architecture design, debugging dead ends, or revision of prior conclusions, call `psi.reflect` before finalizing a plan, patch, or design.
+**Making your AI use it automatically:** add the [auto-use template](docs/installation.md#auto-use-template) to `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.windsurfrules` / `.cursor/rules/` in your project, or paste the [system prompt](examples/system_prompt.md) into LM Studio / Jan AI / Qwen.
 
 ## Updating
 
@@ -90,4 +92,4 @@ If you're on Windows with OneDrive sync and hit hardlink errors, prefix with `$e
 uv run pytest
 ```
 
-Current test status: `28 passed`
+Current test status: `35 passed`

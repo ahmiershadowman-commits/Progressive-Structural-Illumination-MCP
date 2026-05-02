@@ -107,6 +107,9 @@ REGIME_EXPLANATIONS = {
     "repair": "Re-enters upstream structure after failure, corruption, or continuity poison invalidates the current surface.",
 }
 
+_MAX_IMPORT_BYTES = 100 * 1024 * 1024  # 100 MB
+_MAX_RETRIEVE_LIMIT = 500
+
 
 class PsiService:
     def __init__(self, repository: Repository, settings: ServerSettings):
@@ -627,7 +630,8 @@ class PsiService:
                 return run_state
             except KeyError:
                 logger.warning(
-                    "Run %s not found; creating new run with explicit run_id", run_id
+                    "run_id '%s' was supplied but not found; creating new run with that id.",
+                    run_id,
                 )
         started = self.start_run(
             title=task[:80] or "PSI pass",
@@ -1235,6 +1239,7 @@ class PsiService:
         lanes: list[str] | None = None,
         limit: int = 8,
     ) -> dict[str, object]:
+        limit = min(max(1, limit), _MAX_RETRIEVE_LIMIT)
         selected_lanes = [MemoryLane(lane) for lane in (lanes or [lane.value for lane in MemoryLane])]
         hits = self.repository.retrieve(query, selected_lanes, limit=limit)
         return {
@@ -1565,28 +1570,30 @@ class PsiService:
         }
 
     def import_run(self, import_path: str) -> dict[str, object]:
-        MAX_IMPORT_SIZE = 100 * 1024 * 1024  # 100MB
-        
         path = Path(import_path)
-        
-        # Reject symlinks
+
+        # Reject symlinks on the user-supplied path
         if path.is_symlink() or any(part.is_symlink() for part in path.parents if part != Path(".")):
             raise ValueError("Import path cannot be a symlink")
-        
+
         if path.is_dir():
             bundle_path = path / "bundle.json"
             if not bundle_path.exists():
                 bundle_path = path / "bundle.yaml"
         else:
             bundle_path = path
-        
+
+        # Reject symlinks on the resolved bundle file (e.g. bundle.json inside a dir could be a symlink)
+        if bundle_path.is_symlink():
+            raise ValueError("Import bundle file cannot be a symlink")
+
         if not bundle_path.exists():
             raise ValueError(f"Import bundle not found: {bundle_path}")
-        
+
         # Check file size
         file_size = bundle_path.stat().st_size
-        if file_size > MAX_IMPORT_SIZE:
-            raise ValueError(f"Import bundle too large: {file_size} bytes (max {MAX_IMPORT_SIZE})")
+        if file_size > _MAX_IMPORT_BYTES:
+            raise ValueError(f"Import bundle too large: {file_size} bytes (max {_MAX_IMPORT_BYTES})")
         
         raw_content = bundle_path.read_text(encoding="utf-8")
         
@@ -1601,10 +1608,12 @@ class PsiService:
         if not isinstance(payload, dict):
             raise ValueError("Import bundle must be an object")
         
-        # Check manifest schema version if present
-        manifest = payload.get("manifest", {})
-        if manifest and manifest.get("schema_version", "1.2.0") != "1.2.0":
-            raise ValueError(f"Unsupported bundle schema version: {manifest.get('schema_version')}")
+        # Check manifest schema version — require valid version if manifest key is present
+        manifest = payload.get("manifest")
+        if manifest is not None:
+            version = manifest.get("schema_version") if isinstance(manifest, dict) else None
+            if version is None or version != "1.2.0":
+                raise ValueError(f"Unsupported or missing bundle schema version: {version!r}")
         
         # Validate required keys
         if "run_state" not in payload:
@@ -1787,12 +1796,12 @@ class PsiService:
                 evidence=failure_log.splitlines()[:10],
             ),
         )
-        frictions = type_friction(build_analysis_payload("test failure", test_failure=failure_log))
+        payload = build_analysis_payload("test failure", test_failure=failure_log)
+        frictions = type_friction(payload)
         stored = [
             self.repository.record_friction(run_state.metadata.project_id, run_id, signal)
             for signal in frictions
         ]
-        payload = build_analysis_payload("test failure", test_failure=failure_log)
         run_state.state.O = event
         run_state.state.F = stored
         self._apply_runtime_control_surface(
@@ -1859,7 +1868,7 @@ class PsiService:
             selected = list(REGIME_EXPLANATIONS)
         return {
             "regimes": [
-                {"name": key, "explanation": REGIME_EXPLANATIONS[key]}
+                {"name": key, "explanation": REGIME_EXPLANATIONS.get(key, "No explanation available.")}
                 for key in selected
             ],
             "control_families": control_family_catalog(),

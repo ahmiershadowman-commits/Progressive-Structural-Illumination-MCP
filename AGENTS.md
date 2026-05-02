@@ -1,6 +1,54 @@
 # Agent Instructions: PSI Coprocessor MCP
 
-This file provides high-signal, repo-specific guidance for agents working with the PSI Coprocessor MCP, aiming to prevent common mistakes and accelerate ramp-up.
+This file provides high-signal, repo-specific guidance for agents working with the PSI Coprocessor MCP.
+
+## Core Rule
+
+The PSI MCP is your persistent reasoning layer. **Do not create markdown files or documents to record PSI state.** Use `psi.memory.commit` to store findings, `psi.anchor.register` for decisions, and `psi.hypothesis.update` for open hypotheses. The MCP database is the storage layer.
+
+## Required Workflow
+
+For every non-trivial task (code change, design decision, debugging, analysis):
+
+1. **Start or resume a run**
+   `psi.run.start(title="<what you're doing>", scope="<what's in/out>", mode="<see below>", project_id="psi_coprocessor_mcp")`
+   If continuing earlier work: `psi.run.get_state(run_id="<prior-id>")`
+
+2. **Reflect before acting**
+   `psi.reflect(task="<what you're solving>", draft_answer="<your plan>", run_id="<run_id>", project_id="psi_coprocessor_mcp")`
+   Call this before writing code, proposing a design, or finalizing a plan.
+
+3. **Record discoveries**
+   - Finding: `psi.event.record`
+   - Contradiction: `psi.friction.type`
+   - Decision: `psi.anchor.register`
+   - Open question: `psi.hypothesis.update`
+   - Dead end: `psi.dead_end.record`
+
+4. **Check compliance before emitting a final answer**
+   `psi.compliance.check(run_id="<run_id>")`
+
+5. **Persist durable findings**
+   `psi.memory.commit(lane="project", key="<slug>", title="<title>", content="<summary>", project_id="psi_coprocessor_mcp")`
+
+## Naming Conventions
+
+| Field | Value |
+|-------|-------|
+| `project_id` | `psi_coprocessor_mcp` — stable across all sessions |
+| `mode` | `survey` (explore) / `construction` (implement) / `audit` (review) / `repair` (fix) / `closure` (wrap up) |
+| `run_id` | Omit to auto-generate; supply a slug only to resume a named run |
+
+## Specialized Tools
+
+`psi.reflect` covers 80% of cases. Use these when you need deeper structure:
+
+- Stuck on root cause → `psi.gap.analyze`, then `psi.basin.generate`
+- Ripple effects from a change → `psi.sweep.run`
+- Sources unclear or duplicated → `psi.source.audit`
+- Reviewing a diff for hidden risks → `psi.diff.analyze`
+- Test failure to analyze → `psi.test_failure.ingest`
+- Validate before finishing → `psi.stress.run`, then `psi.compliance.check`
 
 ## Core Functionality
 
@@ -11,7 +59,6 @@ This file provides high-signal, repo-specific guidance for agents working with t
 
 - **stdio:** `uvx --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp stdio`
 - **HTTP:** `uvx --from git+https://github.com/ahmiershadowman-commits/Progressive-Structural-Illumination-MCP psi-coprocessor-mcp http --port 8765`
-- **Recommended Usage:** When dealing with ambiguity, hidden dependencies, contradictions, scope drift, architecture design, debugging dead ends, or revising conclusions, call `psi.reflect` before finalizing plans, patches, or designs.
 
 ## Updating
 
@@ -29,7 +76,7 @@ This file provides high-signal, repo-specific guidance for agents working with t
 ## Validation
 
 - Run tests with: `uv run pytest`
-- Current test status: `31 passed`
+- Current test status: `35 passed`
 - **Key Test Gaps:** Focus on `import_run` paths, HTTP transport, concurrent SQLite access, resource not-found paths, and compliance blocking enforcement.
 
 ## Hardening Fixes Applied (2026-04-30)

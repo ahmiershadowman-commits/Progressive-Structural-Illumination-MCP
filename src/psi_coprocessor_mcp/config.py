@@ -54,7 +54,16 @@ class ServerSettings:
         database_path = _expand_path(os.getenv("PSI_MCP_DB_PATH", data_dir / "psi.sqlite3"))
         export_dir = _expand_path(os.getenv("PSI_MCP_EXPORT_DIR", data_dir / "exports"))
         default_durability_mode = os.getenv("PSI_MCP_DURABILITY_MODE", "blocking").lower()
+        if default_durability_mode not in {"blocking", "advisory"}:
+            raise ValueError(
+                f"PSI_MCP_DURABILITY_MODE must be 'blocking' or 'advisory'; got {default_durability_mode!r}"
+            )
         http_host = os.getenv("PSI_MCP_HTTP_HOST", "127.0.0.1")
+        if http_host not in {"127.0.0.1", "localhost", "::1", "[::1]"}:
+            logger.warning(
+                "PSI_MCP_HTTP_HOST is set to %r — server will be reachable on non-loopback interfaces.",
+                http_host,
+            )
         _raw_port = os.getenv("PSI_MCP_HTTP_PORT", "8765")
         try:
             http_port = int(_raw_port)

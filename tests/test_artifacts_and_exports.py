@@ -109,6 +109,78 @@ def test_export_import_round_trip(service, settings):
         import_db.close()
 
 
+def test_import_run_rejects_invalid_bundles(service, tmp_path):
+    import pytest
+
+    # Missing required run_state key
+    bad = tmp_path / "missing_run_state.json"
+    bad.write_text('{"summary": {}}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        service.import_run(str(bad))
+
+    # Wrong schema version
+    bad2 = tmp_path / "bad_schema.json"
+    bad2.write_text(
+        '{"manifest": {"schema_version": "0.0.1"}, "run_state": {}, "summary": {}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="schema version"):
+        service.import_run(str(bad2))
+
+    # Manifest present but schema_version missing — should be rejected
+    bad3 = tmp_path / "no_version.json"
+    bad3.write_text(
+        '{"manifest": {"author": "test"}, "run_state": {}, "summary": {}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="schema version"):
+        service.import_run(str(bad3))
+
+    # Symlink rejection (skip on platforms where symlinks require elevated privileges)
+    real = tmp_path / "real.json"
+    real.write_text("{}", encoding="utf-8")
+    link = tmp_path / "link.json"
+    try:
+        link.symlink_to(real)
+    except (NotImplementedError, OSError):
+        pass
+    else:
+        with pytest.raises(ValueError, match="symlink"):
+            service.import_run(str(link))
+
+
+def test_gap_search_basin_records_roundtrip(service, repository):
+    from psi_coprocessor_mcp.models import BasinType, GapType, SearchStatus
+
+    result = service.reflect(
+        task="Analyze gaps between the stated architecture and the actual implementation.",
+        project_name="Gap Roundtrip Project",
+    )
+    run_id = result["run_id"]
+    service.sync_artifacts(run_id)
+
+    gaps = repository.list_gap_records(run_id)
+    searches = repository.list_search_records(run_id)
+    basins = repository.list_basin_records(run_id)
+
+    for gap in gaps:
+        assert isinstance(gap.gap_type, GapType)
+        assert isinstance(gap.blocking, bool)
+        assert isinstance(gap.metadata, dict)
+        assert isinstance(gap.smallest_discriminative_unit, str)
+
+    for search in searches:
+        assert isinstance(search.status, SearchStatus)
+        assert isinstance(search.metadata, dict)
+        assert isinstance(search.smallest_discriminative_unit, str)
+
+    for basin in basins:
+        assert isinstance(basin.basin_type, BasinType)
+        assert isinstance(basin.preserves, list)
+        assert isinstance(basin.conflicts, list)
+        assert isinstance(basin.metadata, dict)
+
+
 def test_export_run_path_traversal(service, settings):
     import pytest
 

@@ -5,8 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 
-import uvicorn
-
 from .app import create_http_app, create_mcp
 from .config import ServerSettings
 
@@ -34,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
         create_mcp(settings).run(transport="stdio")
         return 0
     if args.command == "http":
+        import uvicorn
         app = create_http_app(settings)
         uvicorn.run(
             app,

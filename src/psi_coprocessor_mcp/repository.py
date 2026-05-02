@@ -1088,8 +1088,10 @@ class Repository:
             """,
             (run_id,),
         ).fetchall()
-        return [
-            GapRecord(
+        result = []
+        for row in rows:
+            meta = _loads(row["metadata_json"], {})
+            result.append(GapRecord(
                 id=row["id"],
                 title=row["title"],
                 gap_type=GapType(row["gap_type"]),
@@ -1098,16 +1100,15 @@ class Repository:
                 nearly_covers=_loads(row["nearly_covers_json"], []),
                 insufficient_because=row["insufficient_because"],
                 dissolved_by=_loads(row["dissolved_by_json"], []),
-                smallest_discriminative_unit=_loads(row["metadata_json"], {}).get("smallest_discriminative_unit", ""),
+                smallest_discriminative_unit=meta.get("smallest_discriminative_unit", ""),
                 discriminator=row["discriminator"],
                 blocking=bool(row["blocking"]),
                 status=row["status"],
-                metadata=_loads(row["metadata_json"], {}),
+                metadata=meta,
                 created_at=_parse_datetime(row["created_at"]),
                 updated_at=_parse_datetime(row["updated_at"]),
-            )
-            for row in rows
-        ]
+            ))
+        return result
 
     def list_search_records(self, run_id: str) -> list[SearchRecord]:
         rows = self.database.execute(
@@ -1119,21 +1120,22 @@ class Repository:
             """,
             (run_id,),
         ).fetchall()
-        return [
-            SearchRecord(
+        result = []
+        for row in rows:
+            meta = _loads(row["metadata_json"], {})
+            result.append(SearchRecord(
                 id=row["id"],
                 query=row["query"],
                 target_object=row["target_object"],
-                smallest_discriminative_unit=_loads(row["metadata_json"], {}).get("smallest_discriminative_unit", ""),
+                smallest_discriminative_unit=meta.get("smallest_discriminative_unit", ""),
                 rationale=row["rationale"],
                 status=SearchStatus(row["status"]),
                 findings=_loads(row["findings_json"], []),
-                metadata=_loads(row["metadata_json"], {}),
+                metadata=meta,
                 created_at=_parse_datetime(row["created_at"]),
                 updated_at=_parse_datetime(row["updated_at"]),
-            )
-            for row in rows
-        ]
+            ))
+        return result
 
     def list_basin_records(self, run_id: str) -> list[BasinRecord]:
         rows = self.database.execute(
@@ -1146,8 +1148,10 @@ class Repository:
             """,
             (run_id,),
         ).fetchall()
-        return [
-            BasinRecord(
+        result = []
+        for row in rows:
+            meta = _loads(row["metadata_json"], {})
+            result.append(BasinRecord(
                 id=row["id"],
                 title=row["title"],
                 basin_type=BasinType(row["basin_type"]),
@@ -1155,16 +1159,15 @@ class Repository:
                 status=row["status"],
                 preserves=_loads(row["preserves_json"], []),
                 conflicts=_loads(row["conflicts_json"], []),
-                explanatory_burden=_loads(row["metadata_json"], {}).get("explanatory_burden", []),
-                weakening_conditions=_loads(row["metadata_json"], {}).get("weakening_conditions", []),
-                discriminator_path=_loads(row["metadata_json"], {}).get("discriminator_path", []),
+                explanatory_burden=meta.get("explanatory_burden", []),
+                weakening_conditions=meta.get("weakening_conditions", []),
+                discriminator_path=meta.get("discriminator_path", []),
                 discriminator=row["discriminator"],
-                metadata=_loads(row["metadata_json"], {}),
+                metadata=meta,
                 created_at=_parse_datetime(row["created_at"]),
                 updated_at=_parse_datetime(row["updated_at"]),
-            )
-            for row in rows
-        ]
+            ))
+        return result
 
     def list_skeptic_findings(self, run_id: str) -> list[SkepticFinding]:
         rows = self.database.execute(
@@ -1359,8 +1362,11 @@ class Repository:
             """,
             (project_id,),
         ).fetchall()
-        return [
-            Anchor(
+        result = []
+        for row in rows:
+            meta = _loads(row["metadata_json"], {})
+            sb_raw = meta.get("scaffold_boundary")
+            result.append(Anchor(
                 id=row["id"],
                 name=row["name"],
                 status=row["status"],
@@ -1372,22 +1378,19 @@ class Repository:
                 rationale=row["rationale"],
                 dependencies=_loads(row["dependencies_json"], []),
                 implications=_loads(row["implications_json"], []),
-                weakening_conditions=_loads(row["metadata_json"], {}).get("weakening_conditions", []),
-                explanatory_burden=_loads(row["metadata_json"], {}).get("explanatory_burden", []),
+                weakening_conditions=meta.get("weakening_conditions", []),
+                explanatory_burden=meta.get("explanatory_burden", []),
                 scaffold_boundary=(
-                    ScaffoldBoundary.model_validate(_loads(row["metadata_json"], {}).get("scaffold_boundary"))
-                    if _loads(row["metadata_json"], {}).get("scaffold_boundary")
-                    else None
+                    ScaffoldBoundary.model_validate(sb_raw) if sb_raw else None
                 ),
-                user_promoted=bool(_loads(row["metadata_json"], {}).get("user_promoted", False)),
-                sweep_survival_count=int(_loads(row["metadata_json"], {}).get("sweep_survival_count", 0)),
-                metadata=_loads(row["metadata_json"], {}),
+                user_promoted=bool(meta.get("user_promoted", False)),
+                sweep_survival_count=int(meta.get("sweep_survival_count", 0)),
+                metadata=meta,
                 invalidated_by=row["invalidated_by"],
                 created_at=_parse_datetime(row["created_at"]),
                 updated_at=_parse_datetime(row["updated_at"]),
-            )
-            for row in rows
-        ]
+            ))
+        return result
 
     def invalidate_anchor(
         self,
@@ -1403,6 +1406,8 @@ class Repository:
         ).fetchone()
         if row is None:
             raise KeyError(f"Unknown anchor_id: {anchor_id}")
+        meta = _loads(row["metadata_json"], {})
+        sb_raw = meta.get("scaffold_boundary")
         anchor = Anchor(
             id=row["id"],
             name=row["name"],
@@ -1415,16 +1420,12 @@ class Repository:
             rationale=reason,
             dependencies=_loads(row["dependencies_json"], []),
             implications=_loads(row["implications_json"], []),
-            weakening_conditions=_loads(row["metadata_json"], {}).get("weakening_conditions", []),
-            explanatory_burden=_loads(row["metadata_json"], {}).get("explanatory_burden", []),
-            scaffold_boundary=(
-                ScaffoldBoundary.model_validate(_loads(row["metadata_json"], {}).get("scaffold_boundary"))
-                if _loads(row["metadata_json"], {}).get("scaffold_boundary")
-                else None
-            ),
-            user_promoted=bool(_loads(row["metadata_json"], {}).get("user_promoted", False)),
-            sweep_survival_count=int(_loads(row["metadata_json"], {}).get("sweep_survival_count", 0)),
-            metadata=_loads(row["metadata_json"], {}),
+            weakening_conditions=meta.get("weakening_conditions", []),
+            explanatory_burden=meta.get("explanatory_burden", []),
+            scaffold_boundary=(ScaffoldBoundary.model_validate(sb_raw) if sb_raw else None),
+            user_promoted=bool(meta.get("user_promoted", False)),
+            sweep_survival_count=int(meta.get("sweep_survival_count", 0)),
+            metadata=meta,
             invalidated_by=invalidated_by,
             created_at=_parse_datetime(row["created_at"]),
             updated_at=datetime.fromisoformat(utc_now_iso()),
@@ -2157,6 +2158,32 @@ class Repository:
                 if clean:
                     sanitized_tokens.append(f'"{clean}"')
             sanitized_query = " ".join(sanitized_tokens) if sanitized_tokens else ""
+            if not sanitized_query:
+                # All tokens were operators/punctuation — fall through to recency query
+                parameters.extend([*lane_filter, limit])
+                rows = self.database.execute(
+                    """
+                    SELECT lane, document_type, ref_id, title, content, tags_json, metadata_json, 0.0 AS score
+                    FROM retrieval_documents
+                    WHERE lane IN (?, ?, ?, ?)
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    parameters,
+                ).fetchall()
+                return [
+                    RetrievalHit(
+                        lane=row["lane"],
+                        document_type=row["document_type"],
+                        ref_id=row["ref_id"],
+                        title=row["title"],
+                        content=row["content"],
+                        score=float(abs(row["score"])),
+                        tags=_loads(row["tags_json"], []),
+                        metadata=_loads(row["metadata_json"], {}),
+                    )
+                    for row in rows
+                ]
             parameters.extend([sanitized_query, *lane_filter, limit])
             rows = self.database.execute(
                 """
@@ -2372,32 +2399,33 @@ class Repository:
         ]
 
     def collect_run_context(self, run_id: str) -> dict[str, object]:
-        run_state = self.get_run_state(run_id)
-        project_id = run_state.metadata.project_id
-        return {
-            "run_state": run_state,
-            "summary": self.get_run_summary(run_id),
-            "events": self.list_visibility_events(run_id),
-            "friction_logs": self.list_friction_logs(run_id),
-            "sweeps": self.list_sweeps(run_id),
-            "artifacts": self.list_artifacts(run_id),
-            "source_objects": self.list_source_objects(run_id),
-            "components": self.list_primitive_components(run_id),
-            "state_variables": self.list_state_variables(run_id),
-            "primitive_operators": self.list_primitive_operators(run_id),
-            "interlocks": self.list_interlocks(run_id),
-            "traces": self.list_trace_steps(run_id),
-            "gaps": self.list_gap_records(run_id),
-            "searches": self.list_search_records(run_id),
-            "basins": self.list_basin_records(run_id),
-            "skeptic_findings": self.list_skeptic_findings(run_id),
-            "antipattern_findings": self.list_antipattern_findings(run_id),
-            "anchors": self.list_anchors(project_id) if project_id else [],
-            "tensions": self.list_tensions(project_id) if project_id else [],
-            "hypotheses": self.list_hypotheses(project_id) if project_id else [],
-            "discriminators": self.list_discriminators(project_id) if project_id else [],
-            "constraints": self.list_constraints(project_id) if project_id else [],
-            "supersessions": self.list_supersession_history(run_id),
-            "typed_claims": self.list_typed_claims(run_id),
-            "compliance": self.get_compliance_report(run_id),
-        }
+        with self.database.read_snapshot():
+            run_state = self.get_run_state(run_id)
+            project_id = run_state.metadata.project_id
+            return {
+                "run_state": run_state,
+                "summary": self.get_run_summary(run_id),
+                "events": self.list_visibility_events(run_id),
+                "friction_logs": self.list_friction_logs(run_id),
+                "sweeps": self.list_sweeps(run_id),
+                "artifacts": self.list_artifacts(run_id),
+                "source_objects": self.list_source_objects(run_id),
+                "components": self.list_primitive_components(run_id),
+                "state_variables": self.list_state_variables(run_id),
+                "primitive_operators": self.list_primitive_operators(run_id),
+                "interlocks": self.list_interlocks(run_id),
+                "traces": self.list_trace_steps(run_id),
+                "gaps": self.list_gap_records(run_id),
+                "searches": self.list_search_records(run_id),
+                "basins": self.list_basin_records(run_id),
+                "skeptic_findings": self.list_skeptic_findings(run_id),
+                "antipattern_findings": self.list_antipattern_findings(run_id),
+                "anchors": self.list_anchors(project_id) if project_id else [],
+                "tensions": self.list_tensions(project_id) if project_id else [],
+                "hypotheses": self.list_hypotheses(project_id) if project_id else [],
+                "discriminators": self.list_discriminators(project_id) if project_id else [],
+                "constraints": self.list_constraints(project_id) if project_id else [],
+                "supersessions": self.list_supersession_history(run_id),
+                "typed_claims": self.list_typed_claims(run_id),
+                "compliance": self.get_compliance_report(run_id),
+            }
